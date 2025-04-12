@@ -13,7 +13,7 @@ from datetime import datetime
 from collections import Counter
 import os
 
-# NLP Resources
+# === NLP Resources ===
 nltk.download('averaged_perceptron_tagger')
 nltk.download('punkt')
 nltk.download('stopwords')
@@ -25,19 +25,20 @@ except OSError:
     spacy.cli.download("en_core_web_sm")
     nlp = spacy.load("en_core_web_sm")
 
+# === App Configuration ===
 app = Flask(__name__)
 CORS(app)
 app.config.from_pyfile("config.py")
 
 db = SQLAlchemy(app)
 
-# Oxylabs credentials
+# === Load Environment Variables ===
 OXYLABS_USERNAME = os.getenv("OXYLABS_USERNAME")
 OXYLABS_PASSWORD = os.getenv("OXYLABS_PASSWORD")
 
 print("✅ Flask app initialized.")
 
-# Sentiment model
+# === Sentiment Analyzer ===
 try:
     sentiment_analyzer = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
     print("✅ Sentiment model loaded successfully.")
@@ -50,6 +51,7 @@ LABEL_MAPPING = {
     "NEUTRAL": "NEUTRAL"
 }
 
+# === Models ===
 class SentimentRecord(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     asin = db.Column(db.String(20), nullable=False)
@@ -59,8 +61,10 @@ class SentimentRecord(db.Model):
     date = db.Column(db.String(20), nullable=False)
     user_id = db.Column(db.Integer, nullable=True)
 
-db.create_all()
+with app.app_context():
+    db.create_all()
 
+# === Helpers ===
 def get_reviews_oxylabs(asin, pages=5, sort_by="recent"):
     url = "https://realtime.oxylabs.io/v1/queries"
     all_reviews, all_dates = [], []
@@ -77,9 +81,6 @@ def get_reviews_oxylabs(asin, pages=5, sort_by="recent"):
         try:
             response = requests.post(url, auth=(OXYLABS_USERNAME, OXYLABS_PASSWORD), json=payload)
             data = response.json()
-            if response.status_code != 200:
-                print(f"❌ API request failed: {response.status_code}, Response: {data}")
-                continue
             reviews_data = data.get("results", [{}])[0].get("content", {}).get("reviews", [])
             for r in reviews_data:
                 content = r.get("content", "").strip()
@@ -89,7 +90,6 @@ def get_reviews_oxylabs(asin, pages=5, sort_by="recent"):
                     all_dates.append(timestamp)
         except Exception as e:
             print(f"❌ API request failed: {e}")
-            continue
     return all_reviews, all_dates
 
 def get_product_metadata(asin):
@@ -122,11 +122,16 @@ def extract_adjectives_and_competitors(reviews):
     mentions = {k: v for k, v in mentions.items() if v > 0}
     return top_adjectives, mentions
 
+def parse_review_date(d):
+    try:
+        return datetime.strptime(d.replace("Reviewed in the United States", "").strip(), "%B %d, %Y").strftime("%Y-%m-%d")
+    except:
+        return "Unknown"
+
+# === Routes ===
 @app.route('/')
 def index():
-    if current_user.is_authenticated:
-        return render_template("dashboard.html")
-    return render_template("index.html")
+    return render_template("dashboard.html") if current_user.is_authenticated else render_template("index.html")
 
 @app.route('/fetch_reviews', methods=['GET'])
 def fetch_reviews():
@@ -139,21 +144,16 @@ def fetch_reviews():
         return jsonify({"error": "No reviews found."}), 404
 
     metadata = get_product_metadata(asin)
-    def parse_date(d):
-        try:
-            return datetime.strptime(d.replace("Reviewed in the United States", "").strip(), "%B %d, %Y").strftime("%Y-%m-%d")
-        except:
-            return "Unknown"
-
-    parsed_dates = [parse_date(d) for d in dates]
+    parsed_dates = [parse_review_date(d) for d in dates]
     top_adjectives, competitor_mentions = extract_adjectives_and_competitors(reviews)
     results = sentiment_analyzer(reviews, truncation=True, max_length=512, padding=True, batch_size=8)
 
-    sentiments, pos_scores, neg_scores, neu_scores = [], [], [], []
+    pos_scores, neg_scores, neu_scores, scores = [], [], [], []
     for review, result, date in zip(reviews, results, parsed_dates):
         sentiment = LABEL_MAPPING.get(result['label'].upper(), "NEUTRAL")
         score = result['score'] * 10
-        sentiments.append(score)
+        scores.append(score)
+
         pos_scores.append(score if sentiment == "POSITIVE" else 0)
         neg_scores.append(score if sentiment == "NEGATIVE" else 0)
         neu_scores.append(score if sentiment == "NEUTRAL" else 0)
@@ -168,11 +168,11 @@ def fetch_reviews():
         ))
     db.session.commit()
 
-    median_score = round(np.median(sentiments), 2) if sentiments else None
-    total = len(sentiments)
-    pos_pct = round((pos_scores.count(max(pos_scores)) / total) * 100, 2) if total else 0
-    neg_pct = round((neg_scores.count(max(neg_scores)) / total) * 100, 2) if total else 0
-    neu_pct = round((neu_scores.count(max(neu_scores)) / total) * 100, 2) if total else 0
+    median_score = round(np.median(scores), 2) if scores else None
+    total = len(scores)
+
+    def score_pct(score_list):
+        return round((sum(1 for s in score_list if s > 0) / total) * 100, 2) if total else 0
 
     return jsonify({
         "product_name": metadata["product_name"],
@@ -186,7 +186,7 @@ def fetch_reviews():
         "positive_scores": pos_scores,
         "negative_scores": neg_scores,
         "neutral_scores": neu_scores,
-        "positive_percentage": pos_pct,
-        "negative_percentage": neg_pct,
-        "neutral_percentage": neu_pct
+        "positive_percentage": score_pct(pos_scores),
+        "negative_percentage": score_pct(neg_scores),
+        "neutral_percentage": score_pct(neu_scores)
     })
