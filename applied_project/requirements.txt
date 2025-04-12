@@ -1,4 +1,6 @@
 flask==3.1.0
+flask_sqlalchemy==3.1.1
+flask_login==0.6.3
 gunicorn==23.0.0
 transformers==4.48.2
 torch==2.6.0
