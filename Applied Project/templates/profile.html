@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>My Profile | InsightLens</title>
+  <style>
+    body {
+      font-family: 'Helvetica Neue', sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #f3f4f6;
+      color: #111;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 20px 40px;
+      background-color: #f8f8f8;
+      border-bottom: 1px solid #e0e0e0;
+    }
+
+    header h1 {
+      font-weight: 700;
+      font-size: 1.8em;
+      margin: 0;
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 20px;
+    }
+
+    .nav-links a {
+      text-decoration: none;
+      color: #333;
+      font-weight: 500;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 40px auto;
+      background-color: white;
+      border-radius: 14px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+      padding: 40px;
+    }
+
+    h2 {
+      margin-top: 0;
+      font-weight: 600;
+      font-size: 1.5em;
+    }
+
+    .info-box {
+      margin-bottom: 40px;
+    }
+
+    .info-box span {
+      display: block;
+      margin-bottom: 10px;
+      font-size: 1.1em;
+    }
+
+    .section-title {
+      font-weight: 600;
+      margin-top: 30px;
+      margin-bottom: 10px;
+      font-size: 1.2em;
+    }
+
+    ul {
+      list-style-type: disc;
+      padding-left: 20px;
+    }
+
+    li {
+      margin-bottom: 6px;
+    }
+
+    .logout-btn {
+      background-color: #c62828;
+      color: white;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      margin-top: 30px;
+    }
+
+    .logout-btn:hover {
+      background-color: #a42222;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>InsightLens</h1>
+    <div class="nav-links">
+      <a href="/dashboard">Dashboard</a>
+      <a href="/profile">Profile</a>
+      <a href="/logout">Logout</a>
+    </div>
+  </header>
+
+  <div class="container">
+    <h2>My Profile</h2>
+    <div class="info-box">
+      <span><strong>Email:</strong> {{ current_user.email }}</span>
+      <span><strong>Joined:</strong> {{ current_user.created_at.strftime('%B %d, %Y') }}</span>
+    </div>
+
+    <div>
+      <div class="section-title">Favorite ASINs</div>
+      <ul>
+        {% for fav in current_user.favorites %}
+          <li>{{ fav.asin }} <small>(Added on {{ fav.added_on.strftime('%Y-%m-%d') }})</small></li>
+        {% else %}
+          <li>No favorites yet.</li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <div>
+      <div class="section-title">Search History</div>
+      <ul>
+        {% for h in current_user.history %}
+          <li>{{ h.asin }} <small>(Searched on {{ h.search_date.strftime('%Y-%m-%d') }})</small></li>
+        {% else %}
+          <li>No history available.</li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <form action="/logout" method="POST">
+      <button type="submit" class="logout-btn">Logout</button>
+    </form>
+  </div>
+
+</body>
+</html>
