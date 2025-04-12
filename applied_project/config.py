@@ -49,8 +49,10 @@ LABEL_MAPPING = {
 }
 
 # Initialize SQLite Database
+DATABASE_PATH = os.getenv("DATABASE_PATH", "sentiments.db")
+
 def init_db():
-    conn = sqlite3.connect("sentiments.db")
+    conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS sentiments (
@@ -136,8 +138,8 @@ def extract_adjectives_and_competitors(reviews):
     adjectives = [adj for adj in adjectives if adj not in stopwords]
     top_adjectives = Counter(adjectives).most_common(10)
 
-    competitors = ["Nivea", "Neutrogena", "Eucerin", "Cetaphil", "CeraVe", "Aveeno", "Olay", "Lubriderm", "Dove", "Gold Bond"]
-    competitor_mentions = {brand.lower(): 0 for brand in competitors}
+    competitors = ["nivea", "neutrogena", "eucerin", "cetaphil", "cerave", "aveeno", "olay", "lubriderm", "dove", "gold bond"]
+    competitor_mentions = {brand: 0 for brand in competitors}
     for word in words:
         if word in competitor_mentions:
             competitor_mentions[word] += 1
