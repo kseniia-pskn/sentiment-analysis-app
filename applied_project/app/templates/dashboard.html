@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard | Sentiment Insight</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f1f1f1;
+            color: #222;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 40px;
+            background-color: #f8f8f8;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        header h1 {
+            font-weight: 700;
+            font-size: 1.8em;
+            margin: 0;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 20px;
+        }
+
+        .nav-links a {
+            text-decoration: none;
+            color: #333;
+            font-weight: 500;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 40px auto;
+            padding: 40px;
+            background-color: white;
+            border-radius: 14px;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.07);
+        }
+
+        h2 {
+            margin-top: 0;
+            font-size: 1.5em;
+        }
+
+        input[type="text"] {
+            padding: 10px;
+            font-size: 1em;
+            width: 280px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+        }
+
+        button {
+            padding: 10px 20px;
+            font-size: 1em;
+            background-color: #111;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            margin-left: 10px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        button:hover {
+            background-color: #333;
+        }
+
+        .section {
+            margin-top: 40px;
+        }
+
+        ul {
+            padding-left: 20px;
+        }
+
+        .chart-container {
+            width: 100%;
+            margin: 20px 0;
+        }
+
+        .flex-group {
+            display: flex;
+            gap: 40px;
+            flex-wrap: wrap;
+        }
+
+        .flex-item {
+            flex: 1 1 300px;
+        }
+
+        .info-box span {
+            display: block;
+            margin-bottom: 6px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>InsightLens</h1>
+        <div class="nav-links">
+            <a href="/dashboard">Dashboard</a>
+            <a href="/profile">Profile</a>
+            <a href="/logout">Logout</a>
+        </div>
+    </header>
+
+    <div class="container">
+        <h2>Search Product by ASIN</h2>
+        <input type="text" id="productSearch" placeholder="Enter ASIN">
+        <button onclick="fetchProductData()">Analyze</button>
+        <p id="error-message" style="color:red; display:none;"></p>
+
+        <div id="output-section" style="display:none;">
+            <div class="section">
+                <h2>Product Info</h2>
+                <div class="info-box">
+                    <span><strong>Name:</strong> <span id="productName">-</span></span>
+                    <span><strong>Manufacturer:</strong> <span id="manufacturer">-</span></span>
+                    <span><strong>Price:</strong> $<span id="price">-</span></span>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Review Summary</h2>
+                <span><strong>Reviews Scraped:</strong> <span id="totalReviews">-</span></span>
+                <span><strong>Median Sentiment Score:</strong> <span id="medianScore">-</span></span>
+            </div>
+
+            <div class="section flex-group">
+                <div class="flex-item">
+                    <h3>Top 10 Adjectives</h3>
+                    <ul id="topAdjectives"><li>Loading...</li></ul>
+                </div>
+                <div class="flex-item">
+                    <h3>Competitor Mentions</h3>
+                    <ul id="competitorMentions"><li>Loading...</li></ul>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Sentiment Trend Over Time</h2>
+                <div class="chart-container">
+                    <canvas id="reviewTrendChart"></canvas>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Sentiment Breakdown</h2>
+                <div class="chart-container">
+                    <canvas id="sentimentBreakdownChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let reviewTrendChart, sentimentBreakdownChart;
+
+        async function fetchProductData() {
+            const asin = document.getElementById("productSearch").value.trim();
+            if (!asin) return alert("Please enter an ASIN.");
+
+            try {
+                const res = await fetch(`/api/fetch_reviews?asin=${asin}`);
+                const data = await res.json();
+
+                if (data.error) {
+                    document.getElementById("error-message").innerText = data.error;
+                    document.getElementById("error-message").style.display = "block";
+                    document.getElementById("output-section").style.display = "none";
+                    return;
+                }
+
+                document.getElementById("error-message").style.display = "none";
+                document.getElementById("output-section").style.display = "block";
+
+                document.getElementById("productName").innerText = data.product_name || "-";
+                document.getElementById("manufacturer").innerText = data.manufacturer || "-";
+                document.getElementById("price").innerText = data.price || "-";
+                document.getElementById("totalReviews").innerText = data.total_reviews || "0";
+                document.getElementById("medianScore").innerText = data.median_score || "-";
+
+                document.getElementById("topAdjectives").innerHTML =
+                    data.top_adjectives.length
+                        ? data.top_adjectives.map(([word, count]) => `<li>${word} (${count})</li>`).join("")
+                        : "<li>No adjectives found.</li>";
+
+                document.getElementById("competitorMentions").innerHTML =
+                    Object.keys(data.competitor_mentions).length
+                        ? Object.entries(data.competitor_mentions).map(([brand, count]) => `<li>${brand} (${count})</li>`).join("")
+                        : "<li>No competitors found.</li>";
+
+                updateCharts(data);
+            } catch (err) {
+                console.error("Error fetching data:", err);
+                document.getElementById("error-message").innerText = "Something went wrong.";
+                document.getElementById("error-message").style.display = "block";
+            }
+        }
+
+        function updateCharts(data) {
+            if (reviewTrendChart) reviewTrendChart.destroy();
+            if (sentimentBreakdownChart) sentimentBreakdownChart.destroy();
+
+            const dateMap = {};
+            data.review_dates.forEach((date, i) => {
+                if (!dateMap[date]) {
+                    dateMap[date] = { positive: 0, negative: 0, neutral: 0 };
+                }
+                dateMap[date].positive += data.positive_scores[i] || 0;
+                dateMap[date].negative += data.negative_scores[i] || 0;
+                dateMap[date].neutral += data.neutral_scores[i] || 0;
+            });
+
+            const dates = Object.keys(dateMap).sort();
+            const pos = dates.map(d => dateMap[d].positive);
+            const neg = dates.map(d => dateMap[d].negative);
+            const neu = dates.map(d => dateMap[d].neutral);
+
+            reviewTrendChart = new Chart(document.getElementById("reviewTrendChart"), {
+                type: 'line',
+                data: {
+                    labels: dates,
+                    datasets: [
+                        { label: 'Positive', data: pos, borderColor: 'green', fill: false },
+                        { label: 'Negative', data: neg, borderColor: 'red', fill: false },
+                        { label: 'Neutral', data: neu, borderColor: 'blue', fill: false }
+                    ]
+                }
+            });
+
+            sentimentBreakdownChart = new Chart(document.getElementById("sentimentBreakdownChart"), {
+                type: 'pie',
+                data: {
+                    labels: ['Positive', 'Negative', 'Neutral'],
+                    datasets: [{
+                        data: [
+                            data.positive_percentage,
+                            data.negative_percentage,
+                            data.neutral_percentage
+                        ],
+                        backgroundColor: ['green', 'red', 'blue']
+                    }]
+                }
+            });
+        }
+    </script>
+</body>
+</html>
