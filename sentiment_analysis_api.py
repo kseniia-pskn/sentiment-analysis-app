@@ -224,6 +224,4 @@ def fetch_reviews():
         "neutral_percentage": neutral_percentage
     })
 
-# Entry point
-if __name__ == '__main__':
-    app.run(debug=True, port=5001)
+   
