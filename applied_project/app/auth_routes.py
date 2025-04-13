@@ -1,78 +1,106 @@
-from flask import Blueprint, render_template, redirect, url_for, flash, request
-from werkzeug.security import generate_password_hash
-from flask_login import login_user, logout_user, login_required
-from .models import db, User
-
-auth = Blueprint('auth', __name__)
-
-# ----- Sign Up -----
-@auth.route('/signup', methods=['GET', 'POST'])
-def signup():
-    if request.method == 'POST':
-        email = request.form.get('email').strip().lower()
-        password = request.form.get('password')
-        confirm = request.form.get('confirm')
-
-        if not email or not password:
-            flash("Email and password required.", "error")
-            return redirect(url_for('auth.signup'))
-
-        if password != confirm:
-            flash("Passwords do not match.", "error")
-            return redirect(url_for('auth.signup'))
-
-        existing_user = User.query.filter_by(email=email).first()
-        if existing_user:
-            flash("Email already registered.", "error")
-            return redirect(url_for('auth.signup'))
-
-        new_user = User(
-            email=email,
-            password_hash=generate_password_hash(password)
-        )
-        db.session.add(new_user)
-        db.session.commit()
-
-        flash("✅ Account created. Please log in.", "success")
-        return redirect(url_for('auth.login'))
-
-    return render_template('signup.html')
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import UserMixin
+from werkzeug.security import generate_password_hash, check_password_hash
+import datetime
+import json
 
 
-# ----- Login -----
-@auth.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        email = request.form.get('email').strip().lower()
-        password = request.form.get('password')
+db = SQLAlchemy()
 
-        user = User.query.filter_by(email=email).first()
+# User table
+class User(UserMixin, db.Model):
+    __tablename__ = 'user'
 
-        # 🔍 Debug line to confirm user fetched
-        if user:
-            print(f"[DEBUG] Found user: {user.email}, Hashed: {user.password_hash}")
-        else:
-            print("[DEBUG] No user found for that email.")
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password_hash = db.Column(db.String(128), nullable=False)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
 
-        if not user:
-            flash("❌ User not found. Please check your email or sign up.", 'danger')
-            return render_template('login.html', email=email)
+    # Relationships
+    history = db.relationship('ReviewHistory', backref='user', lazy=True)
+    favorites = db.relationship('FavoriteASIN', backref='user', lazy=True)
+    snapshots = db.relationship('SentimentSnapshot', backref='user', lazy=True)
 
-        if not user.check_password(password):
-            flash("❌ Incorrect password. Please try again.", 'danger')
-            return render_template('login.html', email=email)
+    def __repr__(self):
+        return f"<User {self.email}>"
 
-        login_user(user)
-        flash("✅ Logged in successfully!", 'success')
-        return redirect(url_for('main.dashboard'))
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
 
-    return render_template('login.html')
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
 
 
-# ----- Logout -----
-@auth.route('/logout')
-@login_required
-def logout():
-    logout_user()
-    flash("You’ve been logged out.", "info")
-    return redirect(url_for('main.index'))
+# Stores each product search by the user
+class ReviewHistory(db.Model):
+    __tablename__ = 'review_history'
+
+    id = db.Column(db.Integer, primary_key=True)
+    asin = db.Column(db.String(20), nullable=False)
+    search_date = db.Column(db.DateTime, default=db.func.current_timestamp())
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+
+    def __repr__(self):
+        return f"<ReviewHistory ASIN={self.asin} UserID={self.user_id}>"
+
+
+# Stores user-marked favorite ASINs
+class FavoriteASIN(db.Model):
+    __tablename__ = 'favorite_asin'
+
+    id = db.Column(db.Integer, primary_key=True)
+    asin = db.Column(db.String(20), nullable=False)
+    added_on = db.Column(db.DateTime, default=db.func.current_timestamp())
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+
+    def __repr__(self):
+        return f"<FavoriteASIN ASIN={self.asin} UserID={self.user_id}>"
+
+
+# Historical sentiment snapshot for caching and reuse
+class SentimentSnapshot(db.Model):
+    __tablename__ = 'sentiment_snapshot'
+
+    id = db.Column(db.Integer, primary_key=True)
+    asin = db.Column(db.String(20), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    product_name = db.Column(db.String(300))
+    manufacturer = db.Column(db.String(200))
+    price = db.Column(db.Float)
+    median_score = db.Column(db.Float)
+    top_adjectives = db.Column(db.Text)
+    competitor_mentions = db.Column(db.Text)
+    review_dates = db.Column(db.Text)
+    positive_scores = db.Column(db.Text)
+    negative_scores = db.Column(db.Text)
+    neutral_scores = db.Column(db.Text)
+    positive_percentage = db.Column(db.Float)
+    negative_percentage = db.Column(db.Float)
+    neutral_percentage = db.Column(db.Float)
+    timestamp = db.Column(db.DateTime, default=db.func.current_timestamp())
+
+    def __repr__(self):
+        return f"<Snapshot {self.asin} by User {self.user_id}>"
+
+    def to_dict(self):
+        def _safe_load(field):
+            try:
+                return json.loads(field or "[]")
+            except json.JSONDecodeError:
+                return []
+
+        return {
+            "product_name": self.product_name,
+            "manufacturer": self.manufacturer,
+            "price": self.price,
+            "median_score": self.median_score,
+            "top_adjectives": _safe_load(self.top_adjectives),
+            "competitor_mentions": _safe_load(self.competitor_mentions),
+            "review_dates": _safe_load(self.review_dates),
+            "positive_scores": _safe_load(self.positive_scores),
+            "negative_scores": _safe_load(self.negative_scores),
+            "neutral_scores": _safe_load(self.neutral_scores),
+            "positive_percentage": self.positive_percentage,
+            "negative_percentage": self.negative_percentage,
+            "neutral_percentage": self.neutral_percentage
+        }
