@@ -1,14 +1,8 @@
 import os
 
-# If deployed on Render with PostgreSQL, use that; fallback to local SQLite for development
-SQLALCHEMY_DATABASE_URI = os.getenv(
-    "DATABASE_URL",  # PostgreSQL URI (Render)
-    f"sqlite:///{os.path.join(os.path.abspath(os.path.dirname(__file__)), 'sentiments.db')}"  # Local fallback
-)
+# PostgreSQL URI
+SQLALCHEMY_DATABASE_URI = "postgresql://sentiments_fr6x_user:k5zqfbhqJZ8p1iD68taYALpavOAn8V44@dpg-cvtuq09r0fns73e1fg3g-a.oregon-postgres.render.com/sentiments_fr6x"
 
-# Automatically fix PostgreSQL URI format if needed (Render sometimes gives `postgres://` which is deprecated)
-if SQLALCHEMY_DATABASE_URI.startswith("postgres://"):
-    SQLALCHEMY_DATABASE_URI = SQLALCHEMY_DATABASE_URI.replace("postgres://", "postgresql://", 1)
 
 SQLALCHEMY_TRACK_MODIFICATIONS = False
 
