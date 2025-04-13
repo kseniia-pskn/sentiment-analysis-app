@@ -1,13 +1,13 @@
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
-import datetime
 import json
-
 
 db = SQLAlchemy()
 
-# User table
+# ---------------------
+# User Table
+# ---------------------
 class User(UserMixin, db.Model):
     __tablename__ = 'user'
 
@@ -17,9 +17,9 @@ class User(UserMixin, db.Model):
     created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
 
     # Relationships
-    history = db.relationship('ReviewHistory', backref='user', lazy=True)
-    favorites = db.relationship('FavoriteASIN', backref='user', lazy=True)
-    snapshots = db.relationship('SentimentSnapshot', backref='user', lazy=True)
+    history = db.relationship('ReviewHistory', backref='user', lazy='dynamic', cascade="all, delete-orphan")
+    favorites = db.relationship('FavoriteASIN', backref='user', lazy='dynamic', cascade="all, delete-orphan")
+    snapshots = db.relationship('SentimentSnapshot', backref='user', lazy='dynamic', cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User {self.email}>"
@@ -31,7 +31,9 @@ class User(UserMixin, db.Model):
         return check_password_hash(self.password_hash, password)
 
 
-# Stores each product search by the user
+# ---------------------
+# Review History
+# ---------------------
 class ReviewHistory(db.Model):
     __tablename__ = 'review_history'
 
@@ -44,7 +46,9 @@ class ReviewHistory(db.Model):
         return f"<ReviewHistory ASIN={self.asin} UserID={self.user_id}>"
 
 
-# Stores user-marked favorite ASINs
+# ---------------------
+# Favorites
+# ---------------------
 class FavoriteASIN(db.Model):
     __tablename__ = 'favorite_asin'
 
@@ -57,7 +61,9 @@ class FavoriteASIN(db.Model):
         return f"<FavoriteASIN ASIN={self.asin} UserID={self.user_id}>"
 
 
-# Historical sentiment snapshot for caching and reuse
+# ---------------------
+# Cached Sentiment Snapshots
+# ---------------------
 class SentimentSnapshot(db.Model):
     __tablename__ = 'sentiment_snapshot'
 
