@@ -41,4 +41,16 @@ def create_app():
     app.register_blueprint(auth_blueprint, url_prefix='/auth')
     app.register_blueprint(api_blueprint, url_prefix='/api')
 
+    # Debug route to confirm DB file
+    @app.route('/debug-db')
+    def debug_db():
+        import os
+        db_path = app.config['SQLALCHEMY_DATABASE_URI'].replace("sqlite:///", "")
+        exists = os.path.exists(db_path)
+        return {
+            "db_path": db_path,
+            "exists": exists,
+            "writable": os.access(db_path, os.W_OK) if exists else False
+        }
+
     return app
