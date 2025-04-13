@@ -1,5 +1,6 @@
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
+from werkzeug.security import generate_password_hash, check_password_hash
 import datetime
 import json
 
@@ -23,6 +24,13 @@ class User(UserMixin, db.Model):
     def __repr__(self):
         return f"<User {self.email}>"
 
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+
+
 # Stores each product search by the user
 class ReviewHistory(db.Model):
     __tablename__ = 'review_history'
@@ -35,6 +43,7 @@ class ReviewHistory(db.Model):
     def __repr__(self):
         return f"<ReviewHistory ASIN={self.asin} UserID={self.user_id}>"
 
+
 # Stores user-marked favorite ASINs
 class FavoriteASIN(db.Model):
     __tablename__ = 'favorite_asin'
@@ -46,6 +55,7 @@ class FavoriteASIN(db.Model):
 
     def __repr__(self):
         return f"<FavoriteASIN ASIN={self.asin} UserID={self.user_id}>"
+
 
 # Historical sentiment snapshot for caching and reuse
 class SentimentSnapshot(db.Model):
@@ -73,17 +83,23 @@ class SentimentSnapshot(db.Model):
         return f"<Snapshot {self.asin} by User {self.user_id}>"
 
     def to_dict(self):
+        def _safe_load(field):
+            try:
+                return json.loads(field or "[]")
+            except json.JSONDecodeError:
+                return []
+
         return {
             "product_name": self.product_name,
             "manufacturer": self.manufacturer,
             "price": self.price,
             "median_score": self.median_score,
-            "top_adjectives": json.loads(self.top_adjectives),
-            "competitor_mentions": json.loads(self.competitor_mentions),
-            "review_dates": json.loads(self.review_dates),
-            "positive_scores": json.loads(self.positive_scores),
-            "negative_scores": json.loads(self.negative_scores),
-            "neutral_scores": json.loads(self.neutral_scores),
+            "top_adjectives": _safe_load(self.top_adjectives),
+            "competitor_mentions": _safe_load(self.competitor_mentions),
+            "review_dates": _safe_load(self.review_dates),
+            "positive_scores": _safe_load(self.positive_scores),
+            "negative_scores": _safe_load(self.negative_scores),
+            "neutral_scores": _safe_load(self.neutral_scores),
             "positive_percentage": self.positive_percentage,
             "negative_percentage": self.negative_percentage,
             "neutral_percentage": self.neutral_percentage
