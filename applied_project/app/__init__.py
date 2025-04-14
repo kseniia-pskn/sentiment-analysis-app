@@ -18,10 +18,14 @@ def create_app():
     db.init_app(app)
 
     # Create database tables and confirm it
+    #with app.app_context():
+        #db.create_all()
+       # print("✅ Database tables created successfully.")
+        #print(f"📂 Using database: {app.config['SQLALCHEMY_DATABASE_URI']}")
     with app.app_context():
-        db.create_all()
-        print("✅ Database tables created successfully.")
-        print(f"📂 Using database: {app.config['SQLALCHEMY_DATABASE_URI']}")
+       db.drop_all()
+       db.create_all()
+       print("⚠️ Dropped and recreated all tables with updated schema.")    
 
     # Set up Flask-Login manager
     login_manager = LoginManager()
