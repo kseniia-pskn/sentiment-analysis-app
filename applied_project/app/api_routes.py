@@ -32,11 +32,15 @@ LABEL_MAPPING = {
 def fetch_reviews():
     asin = request.args.get('asin')
     if not asin:
+        print("[DEBUG] ❌ No ASIN provided in request.")
         return jsonify({"error": "ASIN is required."}), 400
 
-    # Try to find a cached snapshot for this user and ASIN
+    print(f"[DEBUG] 📦 ASIN requested: {asin} by user {current_user.id}")
+
+    # Check for existing snapshot
     snapshot = SentimentSnapshot.query.filter_by(asin=asin, user_id=current_user.id).order_by(SentimentSnapshot.timestamp.desc()).first()
     if snapshot:
+        print("[DEBUG] ✅ Returning cached snapshot for ASIN:", asin)
         return jsonify(snapshot.to_dict())
 
     # Fetch metadata
@@ -46,7 +50,11 @@ def fetch_reviews():
         'parse': True
     }
     meta_response = requests.post("https://realtime.oxylabs.io/v1/queries", auth=(USERNAME, PASSWORD), json=meta_payload)
-    product = meta_response.json().get('results', [{}])[0].get('content', {})
+    print("[DEBUG] 🔄 Metadata status:", meta_response.status_code)
+
+    meta_json = meta_response.json()
+    print("[DEBUG] 📦 Metadata response received:", json.dumps(meta_json, indent=2))
+    product = meta_json.get('results', [{}])[0].get('content', {})
     product_name = product.get("title", "Unknown Product")
     manufacturer = product.get("manufacturer", "Unknown")
     price = product.get("price", 0.0)
@@ -62,10 +70,14 @@ def fetch_reviews():
         "parse": True
     }
     review_response = requests.post("https://realtime.oxylabs.io/v1/queries", auth=(USERNAME, PASSWORD), json=review_payload)
-    reviews_data = review_response.json().get("results", [{}])[0].get("content", {}).get("reviews", [])
+    print("[DEBUG] 🔄 Reviews status:", review_response.status_code)
 
-    reviews = []
-    review_dates = []
+    review_json = review_response.json()
+    print("[DEBUG] 📦 Review response JSON:", json.dumps(review_json, indent=2))
+
+    reviews_data = review_json.get("results", [{}])[0].get("content", {}).get("reviews", [])
+    reviews, review_dates = [], []
+
     for r in reviews_data:
         content = r.get("content", "").strip()
         timestamp = r.get("timestamp", "").strip()
@@ -73,16 +85,24 @@ def fetch_reviews():
             reviews.append(content)
             try:
                 date = datetime.strptime(timestamp.replace("Reviewed in the United States", "").strip(), "%B %d, %Y").strftime("%Y-%m-%d")
-            except:
+            except Exception as e:
+                print(f"[DEBUG] ⚠️ Date parse failed: {e}")
                 date = "Unknown"
             review_dates.append(date)
 
     if not reviews:
+        print("[DEBUG] ❌ No reviews parsed. Raw response:", json.dumps(review_json, indent=2))
         return jsonify({"error": "No reviews found."}), 404
+
+    print(f"[DEBUG] ✅ Parsed {len(reviews)} reviews")
 
     # NLP Analysis
     results = sentiment_analyzer(reviews, truncation=True, max_length=512, padding=True, batch_size=8)
+    print("[DEBUG] 🤖 Sentiment analysis results:", results)
+
     top_adjectives, competitor_mentions = extract_adjectives_and_competitors(reviews)
+    print(f"[DEBUG] 📈 Top adjectives: {top_adjectives}")
+    print(f"[DEBUG] 🏷 Competitor mentions: {competitor_mentions}")
 
     sentiment_counts = {"POSITIVE": 0, "NEGATIVE": 0, "NEUTRAL": 0}
     positive_scores, negative_scores, neutral_scores = [], [], []
@@ -112,29 +132,33 @@ def fetch_reviews():
     negative_percentage = round((sentiment_counts["NEGATIVE"] / total_reviews) * 100, 2) if total_reviews else 0
     neutral_percentage = round((sentiment_counts["NEUTRAL"] / total_reviews) * 100, 2) if total_reviews else 0
 
-    # Save to ReviewHistory
-    history_entry = ReviewHistory(asin=asin, user_id=current_user.id)
-    db.session.add(history_entry)
+    try:
+        history_entry = ReviewHistory(asin=asin, user_id=current_user.id)
+        db.session.add(history_entry)
 
-    # Save Snapshot
-    snapshot = SentimentSnapshot(
-        asin=asin,
-        user_id=current_user.id,
-        product_name=product_name,
-        manufacturer=manufacturer,
-        price=price,
-        median_score=median_score,
-        top_adjectives=json.dumps(top_adjectives),
-        competitor_mentions=json.dumps(dict(competitor_mentions)),
-        review_dates=json.dumps(review_dates),
-        positive_scores=json.dumps(positive_scores),
-        negative_scores=json.dumps(negative_scores),
-        neutral_scores=json.dumps(neutral_scores),
-        positive_percentage=positive_percentage,
-        negative_percentage=negative_percentage,
-        neutral_percentage=neutral_percentage
-    )
-    db.session.add(snapshot)
-    db.session.commit()
+        snapshot = SentimentSnapshot(
+            asin=asin,
+            user_id=current_user.id,
+            product_name=product_name,
+            manufacturer=manufacturer,
+            price=price,
+            median_score=median_score,
+            top_adjectives=json.dumps(top_adjectives),
+            competitor_mentions=json.dumps(dict(competitor_mentions)),
+            review_dates=json.dumps(review_dates),
+            positive_scores=json.dumps(positive_scores),
+            negative_scores=json.dumps(negative_scores),
+            neutral_scores=json.dumps(neutral_scores),
+            positive_percentage=positive_percentage,
+            negative_percentage=negative_percentage,
+            neutral_percentage=neutral_percentage
+        )
+        db.session.add(snapshot)
+        db.session.commit()
+        print("[DEBUG] ✅ Snapshot saved to database.")
+    except Exception as e:
+        db.session.rollback()
+        print(f"[DEBUG] ❌ Error saving snapshot to DB: {e}")
+        return jsonify({"error": "Failed to save analysis."}), 500
 
     return jsonify(snapshot.to_dict())
