@@ -37,13 +37,11 @@ def fetch_reviews():
 
     print(f"[DEBUG] 📦 ASIN requested: {asin} by user {current_user.id}")
 
-    # Check for existing snapshot
     snapshot = SentimentSnapshot.query.filter_by(asin=asin, user_id=current_user.id).order_by(SentimentSnapshot.timestamp.desc()).first()
     if snapshot:
         print("[DEBUG] ✅ Returning cached snapshot for ASIN:", asin)
         return jsonify(snapshot.to_dict())
 
-    # Fetch metadata
     meta_payload = {
         'source': 'amazon_product',
         'query': asin,
@@ -52,6 +50,10 @@ def fetch_reviews():
     meta_response = requests.post("https://realtime.oxylabs.io/v1/queries", auth=(USERNAME, PASSWORD), json=meta_payload)
     print("[DEBUG] 🔄 Metadata status:", meta_response.status_code)
 
+    if meta_response.status_code != 200:
+        print("[DEBUG] ❌ Failed to fetch metadata.")
+        return jsonify({"error": "Failed to fetch product metadata."}), 401
+
     meta_json = meta_response.json()
     print("[DEBUG] 📦 Metadata response received:", json.dumps(meta_json, indent=2))
     product = meta_json.get('results', [{}])[0].get('content', {})
@@ -59,7 +61,6 @@ def fetch_reviews():
     manufacturer = product.get("manufacturer", "Unknown")
     price = product.get("price", 0.0)
 
-    # Fetch reviews
     review_payload = {
         "source": "amazon_reviews",
         "query": asin,
@@ -71,6 +72,10 @@ def fetch_reviews():
     }
     review_response = requests.post("https://realtime.oxylabs.io/v1/queries", auth=(USERNAME, PASSWORD), json=review_payload)
     print("[DEBUG] 🔄 Reviews status:", review_response.status_code)
+
+    if review_response.status_code != 200:
+        print("[DEBUG] ❌ Failed to fetch reviews.")
+        return jsonify({"error": "Failed to fetch reviews."}), 401
 
     review_json = review_response.json()
     print("[DEBUG] 📦 Review response JSON:", json.dumps(review_json, indent=2))
@@ -96,7 +101,6 @@ def fetch_reviews():
 
     print(f"[DEBUG] ✅ Parsed {len(reviews)} reviews")
 
-    # NLP Analysis
     results = sentiment_analyzer(reviews, truncation=True, max_length=512, padding=True, batch_size=8)
     print("[DEBUG] 🤖 Sentiment analysis results:", results)
 
