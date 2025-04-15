@@ -14,6 +14,9 @@ api = Blueprint('api', __name__)
 USERNAME = os.getenv("OXYLABS_USERNAME")
 PASSWORD = os.getenv("OXYLABS_PASSWORD")
 
+print(f"[DEBUG] Loaded Oxylabs USERNAME: {USERNAME}")
+print(f"[DEBUG] Loaded Oxylabs PASSWORD: {PASSWORD}")
+
 sentiment_analyzer = pipeline("sentiment-analysis", model="cardiffnlp/twitter-roberta-base-sentiment-latest")
 
 LABEL_MAPPING = {
@@ -166,3 +169,23 @@ def fetch_reviews():
         return jsonify({"error": "Failed to save analysis."}), 500
 
     return jsonify(snapshot.to_dict())
+
+
+@api.route('/debug-oxylabs-auth')
+def debug_oxylabs_auth():
+    if not USERNAME or not PASSWORD:
+        return jsonify({"error": "Missing credentials"}), 400
+
+    test_payload = {
+        "source": "amazon_product",
+        "query": "B0BTRWBVTH",
+        "parse": True
+    }
+    r = requests.post("https://realtime.oxylabs.io/v1/queries", auth=(USERNAME, PASSWORD), json=test_payload)
+    try:
+        return jsonify({
+            "status_code": r.status_code,
+            "response": r.json() if r.status_code != 401 else "Unauthorized"
+        })
+    except Exception as e:
+        return jsonify({"status_code": r.status_code, "error": str(e)})
