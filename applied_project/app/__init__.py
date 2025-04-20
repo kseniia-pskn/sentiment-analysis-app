@@ -2,6 +2,7 @@ from flask import Flask
 from flask_cors import CORS
 from flask_login import LoginManager
 from .models import db, User
+import nltk
 import os
 
 def create_app():
@@ -16,6 +17,25 @@ def create_app():
 
     # Initialize SQLAlchemy
     db.init_app(app)
+
+    # Setup custom NLTK data path and download fallback resources
+    nltk_data_path = os.getenv("NLTK_DATA", "/opt/render/nltk_data")
+    nltk.data.path.append(nltk_data_path)
+
+    required_resources = [
+        ('tokenizers/punkt', 'punkt'),
+        ('corpora/stopwords', 'stopwords'),
+        ('taggers/averaged_perceptron_tagger', 'averaged_perceptron_tagger')
+    ]
+
+    for res_path, res_name in required_resources:
+        try:
+            nltk.data.find(res_path)
+        except LookupError:
+            try:
+                nltk.download(res_name, download_dir=nltk_data_path)
+            except Exception as e:
+                print(f"⚠️ Failed to download NLTK resource '{res_name}':", e)
 
     # Create database tables and confirm it
     with app.app_context():

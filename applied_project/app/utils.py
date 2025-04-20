@@ -1,6 +1,5 @@
 import nltk
 import spacy
-import re
 import os
 from collections import Counter
 
@@ -8,12 +7,15 @@ from collections import Counter
 nltk_data_path = os.getenv("NLTK_DATA", "/opt/render/nltk_data")
 nltk.data.path.append(nltk_data_path)
 
-# Ensure necessary NLTK models are available
-for resource in ['punkt', 'stopwords', 'averaged_perceptron_tagger']:
+# Ensure necessary NLTK models are available with robust fallback
+for resource, path_type in [("punkt", "tokenizers"), ("stopwords", "corpora"), ("averaged_perceptron_tagger", "taggers")]:
     try:
-        nltk.data.find(f'tokenizers/{resource}' if resource == 'punkt' else f'corpora/{resource}')
+        nltk.data.find(f"{path_type}/{resource}")
     except LookupError:
-        nltk.download(resource, download_dir=nltk_data_path)
+        try:
+            nltk.download(resource, download_dir=nltk_data_path)
+        except Exception as e:
+            print(f"[WARNING] Failed to download {resource}: {e}")
 
 # Load SpaCy English model
 try:
@@ -26,8 +28,12 @@ except OSError:
 # Extract adjectives and competitor mentions
 def extract_adjectives_and_competitors(reviews):
     text = " ".join(reviews).lower()
-    words = nltk.word_tokenize(text)
-    tagged_words = nltk.pos_tag(words)
+    try:
+        words = nltk.word_tokenize(text)
+        tagged_words = nltk.pos_tag(words)
+    except Exception as e:
+        print(f"[ERROR] Tokenization failed: {e}")
+        return [], {}
 
     adjectives = [word for word, tag in tagged_words if tag in ["JJ", "JJR", "JJS"] and word.isalpha()]
     stopwords = set(nltk.corpus.stopwords.words('english'))

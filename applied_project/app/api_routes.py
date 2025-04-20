@@ -16,6 +16,7 @@ api = Blueprint('api', __name__)
 USERNAME = os.getenv("OXYLABS_USERNAME")
 PASSWORD = os.getenv("OXYLABS_PASSWORD")
 
+
 sentiment_analyzer = pipeline("sentiment-analysis", model="cardiffnlp/twitter-roberta-base-sentiment-latest")
 
 LABEL_MAPPING = {
