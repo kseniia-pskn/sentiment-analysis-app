@@ -7,15 +7,13 @@ from transformers import pipeline
 from flask_login import current_user, login_required
 from .utils import extract_adjectives_and_competitors
 from .models import db, ReviewHistory, SentimentSnapshot
-from pprint import pprint
+from collections import defaultdict
 import json
-from collections import defaultdict, Counter
 
 api = Blueprint('api', __name__)
 
 USERNAME = os.getenv("OXYLABS_USERNAME")
 PASSWORD = os.getenv("OXYLABS_PASSWORD")
-
 
 sentiment_analyzer = pipeline("sentiment-analysis", model="cardiffnlp/twitter-roberta-base-sentiment-latest")
 
@@ -37,9 +35,12 @@ def fetch_reviews():
     if not asin:
         return jsonify({"error": "ASIN is required."}), 400
 
-    snapshot = SentimentSnapshot.query.filter_by(asin=asin, user_id=current_user.id).order_by(SentimentSnapshot.timestamp.desc()).first()
-    if snapshot:
-        return jsonify(snapshot.to_dict())
+    try:
+        snapshot = SentimentSnapshot.query.filter_by(asin=asin, user_id=current_user.id).order_by(SentimentSnapshot.timestamp.desc()).first()
+        if snapshot:
+            return jsonify(snapshot.to_dict())
+    except Exception as db_err:
+        print("[ERROR] Snapshot retrieval failed:", db_err)
 
     meta_payload = {
         'source': 'amazon_product',
@@ -55,20 +56,23 @@ def fetch_reviews():
     manufacturer = product.get("manufacturer", "Unknown")
     price = product.get("price", 0.0)
 
-    review_payload = {
-        "source": "amazon_reviews",
-        "query": asin,
-        "page": 1,
-        "pages": 5,
-        "context": [{"key": "sort_by", "value": "recent"}],
-        "geo_location": "90210",
-        "parse": True
-    }
-    review_response = requests.post("https://realtime.oxylabs.io/v1/queries", auth=(USERNAME, PASSWORD), json=review_payload)
-    if review_response.status_code != 200:
-        return jsonify({"error": "Failed to fetch reviews."}), 401
-
-    reviews_data = review_response.json().get("results", [{}])[0].get("content", {}).get("reviews", [])
+    reviews_data = []
+    for page in range(1, 6):
+        review_payload = {
+            "source": "amazon_reviews",
+            "query": asin,
+            "page": page,
+            "context": [{"key": "sort_by", "value": "recent"}],
+            "geo_location": "90210",
+            "parse": True
+        }
+        try:
+            response = requests.post("https://realtime.oxylabs.io/v1/queries", auth=(USERNAME, PASSWORD), json=review_payload)
+            if response.status_code == 200:
+                page_reviews = response.json().get("results", [{}])[0].get("content", {}).get("reviews", [])
+                reviews_data.extend(page_reviews)
+        except Exception as review_err:
+            print("[ERROR] Review page fetch failed:", review_err)
 
     reviews, review_dates, countries = [], [], []
     review_meta = []
@@ -105,9 +109,17 @@ def fetch_reviews():
     if not reviews:
         return jsonify({"error": "No reviews found."}), 404
 
-    results = sentiment_analyzer(reviews, truncation=True, max_length=512, padding=True, batch_size=8)
+    try:
+        results = sentiment_analyzer(reviews, truncation=True, max_length=512, padding=True, batch_size=8)
+    except Exception as sa_err:
+        print("[ERROR] Sentiment analysis failed:", sa_err)
+        return jsonify({"error": "Sentiment analysis failed."}), 500
 
-    top_adjectives, competitor_mentions = extract_adjectives_and_competitors(reviews)
+    try:
+        top_adjectives, competitor_mentions = extract_adjectives_and_competitors(reviews)
+    except Exception as nlp_err:
+        print("[ERROR] Tokenization failed:", nlp_err)
+        top_adjectives, competitor_mentions = [], {}
 
     sentiment_counts = {"POSITIVE": 0, "NEGATIVE": 0, "NEUTRAL": 0}
     positive_scores, negative_scores, neutral_scores = [], [], []
@@ -163,12 +175,15 @@ def fetch_reviews():
             neutral_scores=json.dumps(neutral_scores),
             positive_percentage=positive_percentage,
             negative_percentage=negative_percentage,
-            neutral_percentage=neutral_percentage
+            neutral_percentage=neutral_percentage,
+            country_sentiment=json.dumps(dict(country_sentiment)),
+            top_helpful_reviews=json.dumps(top_helpful_reviews)
         )
         db.session.add(snapshot)
         db.session.commit()
     except Exception as e:
         db.session.rollback()
+        print("[ERROR] Failed to save snapshot:", e)
         return jsonify({"error": "Failed to save analysis."}), 500
 
     return jsonify({

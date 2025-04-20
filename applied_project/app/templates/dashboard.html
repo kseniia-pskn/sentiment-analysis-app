@@ -105,6 +105,30 @@
             display: block;
             margin-bottom: 6px;
         }
+
+        #loadingSpinner {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(255,255,255,0.9);
+            z-index: 1000;
+        }
+
+        #loadingSpinner svg {
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
@@ -117,7 +141,17 @@
     </div>
 </header>
 
-<div class="container">
+<div id="loadingSpinner">
+    <svg width="50" height="50" viewBox="0 0 100 100" fill="none">
+        <circle cx="50" cy="50" r="35" stroke="#111" stroke-width="10" stroke-linecap="round" stroke-dasharray="164.93361431346415 56.97787143782138">
+            <animateTransform attributeName="transform" type="rotate" repeatCount="indefinite" dur="1s"
+                              values="0 50 50;360 50 50" keyTimes="0;1"></animateTransform>
+        </circle>
+    </svg>
+    <p>Initializing service...</p>
+</div>
+
+<div class="container" style="display:none;" id="mainContainer">
     <h2>Search Product by ASIN</h2>
     <input type="text" id="productSearch" placeholder="Enter ASIN">
     <button onclick="fetchProductData()">Analyze</button>
@@ -135,8 +169,16 @@
 
         <div class="section">
             <h2>Review Summary</h2>
-            <span><strong>Reviews Scraped:</strong> <span id="totalReviews">-</span></span>
-            <span><strong>Median Sentiment Score:</strong> <span id="medianScore">-</span></span>
+            <div><strong>Reviews Scraped:</strong> <span id="totalReviews">-</span></div>
+            <div><strong>Median Sentiment Score:</strong> <span id="medianScore">-</span></div>
+        </div>
+
+        <div class="section">
+            <h2>Most Helpful Reviews</h2>
+            <details>
+                <summary>Click to view top 3 most helpful reviews</summary>
+                <ul id="helpfulReviews" style="margin-top: 1em;"></ul>
+            </details>
         </div>
 
         <div class="section flex-group">
@@ -160,16 +202,8 @@
         <div class="section">
             <h2>Sentiment Breakdown</h2>
             <div class="chart-container">
-                <canvas id="sentimentBreakdownChart"></canvas>
+                <canvas id="sentimentBreakdownChart" height="200"></canvas>
             </div>
-        </div>
-
-        <div class="section">
-            <h2>Most Helpful Reviews</h2>
-            <details>
-                <summary>Click to view top 3 most helpful reviews</summary>
-                <ul id="helpfulReviews" style="margin-top: 1em;"></ul>
-            </details>
         </div>
 
         <div class="section">
@@ -182,147 +216,10 @@
 </div>
 
 <script>
-    let reviewTrendChart, sentimentBreakdownChart, countrySentimentChart;
-
-    async function fetchProductData() {
-        const asin = document.getElementById("productSearch").value.trim();
-        if (!asin) return alert("Please enter an ASIN.");
-
-        try {
-            const res = await fetch(`/api/fetch_reviews?asin=${asin}`);
-            const data = await res.json();
-
-            if (data.error) {
-                document.getElementById("error-message").innerText = data.error;
-                document.getElementById("error-message").style.display = "block";
-                document.getElementById("output-section").style.display = "none";
-                return;
-            }
-
-            document.getElementById("error-message").style.display = "none";
-            document.getElementById("output-section").style.display = "block";
-
-            document.getElementById("productName").innerText = data.product_name || "-";
-            document.getElementById("manufacturer").innerText = data.manufacturer || "-";
-            document.getElementById("price").innerText = data.price || "-";
-            document.getElementById("totalReviews").innerText = data.total_reviews || data.review_dates.length || "0";
-            document.getElementById("medianScore").innerText = data.median_score || "-";
-
-            document.getElementById("topAdjectives").innerHTML =
-                data.top_adjectives.length
-                    ? data.top_adjectives.map(([word, count]) => `<li>${word} (${count})</li>`).join("")
-                    : "<li>No adjectives found.</li>";
-
-            document.getElementById("competitorMentions").innerHTML =
-                Object.keys(data.competitor_mentions).length
-                    ? Object.entries(data.competitor_mentions).map(([brand, count]) => `<li>${brand} (${count})</li>`).join("")
-                    : "<li>No competitors found.</li>";
-
-            document.getElementById("helpfulReviews").innerHTML =
-                data.top_helpful_reviews.length
-                    ? data.top_helpful_reviews.map(r => `<li><strong>${r.title}</strong><br>${r.text}</li>`).join("<br><br>")
-                    : "<li>No helpful reviews found.</li>";
-
-            updateCharts(data);
-        } catch (err) {
-            console.error("Error fetching data:", err);
-            document.getElementById("error-message").innerText = "Something went wrong.";
-            document.getElementById("error-message").style.display = "block";
-        }
-    }
-
-    function updateCharts(data) {
-        if (reviewTrendChart) reviewTrendChart.destroy();
-        if (sentimentBreakdownChart) sentimentBreakdownChart.destroy();
-        if (countrySentimentChart) countrySentimentChart.destroy();
-
-        const dateMap = {};
-        data.review_dates.forEach((date, i) => {
-            if (!dateMap[date]) {
-                dateMap[date] = { positive: 0, negative: 0, neutral: 0 };
-            }
-            dateMap[date].positive += data.positive_scores[i] || 0;
-            dateMap[date].negative += data.negative_scores[i] || 0;
-            dateMap[date].neutral += data.neutral_scores[i] || 0;
-        });
-
-        const dates = Object.keys(dateMap).sort();
-        const pos = dates.map(d => dateMap[d].positive);
-        const neg = dates.map(d => dateMap[d].negative);
-        const neu = dates.map(d => dateMap[d].neutral);
-
-        reviewTrendChart = new Chart(document.getElementById("reviewTrendChart"), {
-            type: 'line',
-            data: {
-                labels: dates,
-                datasets: [
-                    { label: 'Positive', data: pos, borderColor: 'green', fill: false },
-                    { label: 'Negative', data: neg, borderColor: 'red', fill: false },
-                    { label: 'Neutral', data: neu, borderColor: 'blue', fill: false }
-                ]
-            }
-        });
-
-        sentimentBreakdownChart = new Chart(document.getElementById("sentimentBreakdownChart"), {
-            type: 'pie',
-            data: {
-                labels: ['Positive', 'Negative', 'Neutral'],
-                datasets: [{
-                    data: [
-                        data.positive_percentage,
-                        data.negative_percentage,
-                        data.neutral_percentage
-                    ],
-                    backgroundColor: ['green', 'red', 'blue']
-                }]
-            }
-        });
-
-        const ctxCountry = document.getElementById("countrySentimentChart").getContext("2d");
-        countrySentimentChart = new Chart(ctxCountry, {
-            type: 'bar',
-            data: {
-                labels: data.country_sentiment_chart.labels,
-                datasets: [
-                    {
-                        label: 'Positive %',
-                        data: data.country_sentiment_chart.positive,
-                        backgroundColor: 'green'
-                    },
-                    {
-                        label: 'Negative %',
-                        data: data.country_sentiment_chart.negative,
-                        backgroundColor: 'red'
-                    }
-                ]
-            },
-            options: {
-                responsive: true,
-                indexAxis: 'y',
-                scales: {
-                    x: {
-                        max: 100,
-                        title: { display: true, text: 'Percentage (%)' }
-                    },
-                    y: {
-                        title: { display: true, text: 'Country' }
-                    }
-                }
-            }
-        });
-    }
-
-    function logout() {
-        fetch('/auth/logout', {
-            method: 'POST',
-            credentials: 'include'
-        }).then(() => {
-            window.location.href = '/auth/login';
-        }).catch(err => {
-            alert('Logout failed');
-            console.error(err);
-        });
-    }
+    window.addEventListener("load", () => {
+        document.getElementById("loadingSpinner").style.display = "none";
+        document.getElementById("mainContainer").style.display = "block";
+    });
 </script>
 </body>
 </html>
