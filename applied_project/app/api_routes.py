@@ -6,7 +6,7 @@ from datetime import datetime
 from transformers import pipeline
 from flask_login import current_user, login_required
 from .utils import extract_adjectives_and_competitors, fetch_competitor_names
-from .models import db, ReviewHistory, SentimentSnapshot
+from .models import db, ReviewHistory, SentimentSnapshot, CompetitorCache
 from collections import defaultdict
 import json
 
@@ -141,9 +141,22 @@ def fetch_reviews():
         print("[ERROR] Tokenization failed:", nlp_err)
         top_adjectives, competitor_mentions = [], {}
 
+    # Check if GPT competitors are cached
+    gpt_competitors = []
     try:
-        print("💡 Fetching GPT competitor suggestions...")
-        gpt_competitors = fetch_competitor_names(product_name, manufacturer)
+        cache_entry = CompetitorCache.query.filter_by(product_name=product_name, manufacturer=manufacturer).first()
+        if cache_entry:
+            print("📦 Using cached GPT competitor names.")
+            gpt_competitors = json.loads(cache_entry.names)
+        else:
+            print("💡 Fetching GPT competitor suggestions...")
+            gpt_competitors = fetch_competitor_names(product_name, manufacturer)
+            db.session.add(CompetitorCache(
+                product_name=product_name,
+                manufacturer=manufacturer,
+                names=json.dumps(gpt_competitors)
+            ))
+            db.session.commit()
         for comp in gpt_competitors:
             competitor_mentions[comp.lower()] += 1
     except Exception as gpt_err:

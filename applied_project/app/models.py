@@ -3,6 +3,7 @@ from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 import json
 
+
 db = SQLAlchemy()
 
 # ---------------------
@@ -116,3 +117,19 @@ class SentimentSnapshot(db.Model):
             "country_sentiment_chart": _safe_load(self.country_sentiment, default="{}"),
             "top_helpful_reviews": _safe_load(self.top_helpful_reviews)
         }
+
+
+# ---------------------
+# GPT Competitor Cache
+# ---------------------
+class CompetitorCache(db.Model):
+    __tablename__ = 'competitor_cache'
+
+    id = db.Column(db.Integer, primary_key=True)
+    product_name = db.Column(db.String(300), nullable=False)
+    manufacturer = db.Column(db.String(200), nullable=False)
+    names = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+
+    def __repr__(self):
+        return f"<GPTCache {self.product_name} by {self.manufacturer}>"
