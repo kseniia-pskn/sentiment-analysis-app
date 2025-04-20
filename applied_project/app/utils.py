@@ -1,14 +1,21 @@
 import nltk
 import spacy
 import re
+import os
 from collections import Counter
 
-# Download required NLTK models (called only once in main)
-nltk.download('punkt')
-nltk.download('stopwords')
-nltk.download('averaged_perceptron_tagger')
+# Setup custom NLTK data path (for deployment environments like Render)
+nltk_data_path = os.getenv("NLTK_DATA", "/opt/render/nltk_data")
+nltk.data.path.append(nltk_data_path)
 
-# Load SpaCy
+# Ensure necessary NLTK models are available
+for resource in ['punkt', 'stopwords', 'averaged_perceptron_tagger']:
+    try:
+        nltk.data.find(f'tokenizers/{resource}' if resource == 'punkt' else f'corpora/{resource}')
+    except LookupError:
+        nltk.download(resource, download_dir=nltk_data_path)
+
+# Load SpaCy English model
 try:
     nlp = spacy.load("en_core_web_sm")
 except OSError:
@@ -27,13 +34,13 @@ def extract_adjectives_and_competitors(reviews):
     adjectives = [adj for adj in adjectives if adj not in stopwords]
     top_adjectives = Counter(adjectives).most_common(10)
 
-    competitors = ["nivea", "neutrogena", "eucerin", "cetaphil", "cerave", "aveeno", "olay", "lubriderm", "dove", "gold bond"]
-    competitor_mentions = {brand: 0 for brand in competitors}
+    # Basic brand extraction from NER (fallback if manufacturer isn't enough)
+    competitor_mentions = Counter()
+    for doc in nlp.pipe(reviews, disable=["parser"]):
+        for ent in doc.ents:
+            if ent.label_ == "ORG":
+                competitor_mentions[ent.text.lower()] += 1
 
-    for word in words:
-        if word in competitor_mentions:
-            competitor_mentions[word] += 1
+    filtered_mentions = {k: v for k, v in competitor_mentions.items() if v > 0}
 
-    competitor_mentions = {k: v for k, v in competitor_mentions.items() if v > 0}
-
-    return top_adjectives, competitor_mentions
+    return top_adjectives, filtered_mentions
