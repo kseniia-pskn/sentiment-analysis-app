@@ -32,31 +32,46 @@ LABEL_MAPPING = {
 @login_required
 def fetch_reviews():
     asin = request.args.get('asin')
+    print(f"🔍 Requested ASIN: {asin}")
     if not asin:
+        print("❌ No ASIN provided.")
         return jsonify({"error": "ASIN is required."}), 400
 
     try:
-        snapshot = SentimentSnapshot.query.filter_by(asin=asin, user_id=current_user.id).order_by(SentimentSnapshot.timestamp.desc()).first()
+        snapshot = SentimentSnapshot.query.filter_by(
+            asin=asin, user_id=current_user.id
+        ).order_by(SentimentSnapshot.timestamp.desc()).first()
+
         if snapshot:
+            print("✅ Returning cached snapshot.")
             return jsonify(snapshot.to_dict())
     except Exception as db_err:
-        print("[ERROR] Snapshot retrieval failed:", db_err)
+        print("[ERROR] Snapshot DB lookup failed:", db_err)
 
+    # --------- Fetch Metadata ---------
+    print("📦 Fetching product metadata...")
     meta_payload = {
         'source': 'amazon_product',
         'query': asin,
         'parse': True
     }
-    meta_response = requests.post("https://realtime.oxylabs.io/v1/queries", auth=(USERNAME, PASSWORD), json=meta_payload)
-    if meta_response.status_code != 200:
-        return jsonify({"error": "Failed to fetch product metadata."}), 401
+    try:
+        meta_response = requests.post("https://realtime.oxylabs.io/v1/queries",
+                                      auth=(USERNAME, PASSWORD), json=meta_payload)
+        meta_response.raise_for_status()
+    except Exception as meta_err:
+        print("[ERROR] Failed to fetch metadata:", meta_err)
+        return jsonify({"error": "Failed to fetch product metadata."}), 500
 
     product = meta_response.json().get('results', [{}])[0].get('content', {})
     product_name = product.get("title", "Unknown Product")
     manufacturer = product.get("manufacturer", "Unknown")
     price = product.get("price", 0.0)
+    print(f"🛍️ Product: {product_name} | Manufacturer: {manufacturer} | Price: {price}")
 
+    # --------- Fetch Reviews ---------
     reviews_data = []
+    print("🔄 Fetching reviews from 5 pages...")
     for page in range(1, 6):
         review_payload = {
             "source": "amazon_reviews",
@@ -67,15 +82,22 @@ def fetch_reviews():
             "parse": True
         }
         try:
-            response = requests.post("https://realtime.oxylabs.io/v1/queries", auth=(USERNAME, PASSWORD), json=review_payload)
-            if response.status_code == 200:
-                page_reviews = response.json().get("results", [{}])[0].get("content", {}).get("reviews", [])
-                reviews_data.extend(page_reviews)
+            response = requests.post("https://realtime.oxylabs.io/v1/queries",
+                                     auth=(USERNAME, PASSWORD), json=review_payload)
+            response.raise_for_status()
+            page_reviews = response.json().get("results", [{}])[0].get("content", {}).get("reviews", [])
+            print(f"📄 Page {page} reviews fetched: {len(page_reviews)}")
+            reviews_data.extend(page_reviews)
         except Exception as review_err:
-            print("[ERROR] Review page fetch failed:", review_err)
+            print(f"[ERROR] Failed to fetch page {page} reviews:", review_err)
 
-    reviews, review_dates, countries = [], [], []
-    review_meta = []
+    if not reviews_data:
+        print("❌ No reviews found.")
+        return jsonify({"error": "No reviews found."}), 404
+
+    # --------- Process Reviews ---------
+    print(f"🧾 Total reviews to process: {len(reviews_data)}")
+    reviews, review_dates, countries, review_meta = [], [], [], []
 
     for r in reviews_data:
         content = r.get("content", "").strip()
@@ -106,24 +128,27 @@ def fetch_reviews():
                 "country": country
             })
 
-    if not reviews:
-        return jsonify({"error": "No reviews found."}), 404
+    print(f"✍️ Reviews cleaned: {len(reviews)}")
 
+    # --------- Sentiment Analysis ---------
     try:
+        print("🤖 Running sentiment analysis...")
         results = sentiment_analyzer(reviews, truncation=True, max_length=512, padding=True, batch_size=8)
     except Exception as sa_err:
         print("[ERROR] Sentiment analysis failed:", sa_err)
         return jsonify({"error": "Sentiment analysis failed."}), 500
 
+    # --------- NLP Feature Extraction ---------
     try:
+        print("🔍 Extracting adjectives and competitors...")
         top_adjectives, competitor_mentions = extract_adjectives_and_competitors(reviews)
     except Exception as nlp_err:
         print("[ERROR] Tokenization failed:", nlp_err)
         top_adjectives, competitor_mentions = [], {}
 
+    # --------- Build Sentiment Data ---------
     sentiment_counts = {"POSITIVE": 0, "NEGATIVE": 0, "NEUTRAL": 0}
     positive_scores, negative_scores, neutral_scores = [], [], []
-
     country_sentiment = defaultdict(lambda: {"positive": 0, "negative": 0})
 
     for i, r in enumerate(results):
@@ -154,9 +179,15 @@ def fetch_reviews():
     negative_percentage = round((sentiment_counts["NEGATIVE"] / total_reviews) * 100, 2) if total_reviews else 0
     neutral_percentage = round((sentiment_counts["NEUTRAL"] / total_reviews) * 100, 2) if total_reviews else 0
 
-    top_helpful_reviews = sorted(review_meta, key=lambda x: x.get("helpful_count", 0), reverse=True)[:3]
+    print(f"📊 Median Score: {median_score}")
+    print(f"👍 {positive_percentage}% | 👎 {negative_percentage}% | 😐 {neutral_percentage}%")
 
+    top_helpful_reviews = sorted(review_meta, key=lambda x: x.get("helpful_count", 0), reverse=True)[:3]
+    print(f"📌 Top helpful reviews: {len(top_helpful_reviews)}")
+
+    # --------- Save to DB ---------
     try:
+        print("💾 Saving to database...")
         history_entry = ReviewHistory(asin=asin, user_id=current_user.id)
         db.session.add(history_entry)
 
@@ -181,11 +212,13 @@ def fetch_reviews():
         )
         db.session.add(snapshot)
         db.session.commit()
+        print("✅ Snapshot saved successfully.")
     except Exception as e:
         db.session.rollback()
         print("[ERROR] Failed to save snapshot:", e)
         return jsonify({"error": "Failed to save analysis."}), 500
 
+    print("🚀 Returning JSON payload to client.")
     return jsonify({
         **snapshot.to_dict(),
         "country_sentiment": dict(country_sentiment),
