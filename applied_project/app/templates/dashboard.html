@@ -163,11 +163,26 @@
                 <canvas id="sentimentBreakdownChart"></canvas>
             </div>
         </div>
+
+        <div class="section">
+            <h2>Most Helpful Reviews</h2>
+            <details>
+                <summary>Click to view top 3 most helpful reviews</summary>
+                <ul id="helpfulReviews" style="margin-top: 1em;"></ul>
+            </details>
+        </div>
+
+        <div class="section">
+            <h2>Country Sentiment Analysis (Top 5)</h2>
+            <div class="chart-container">
+                <canvas id="countrySentimentChart"></canvas>
+            </div>
+        </div>
     </div>
 </div>
 
 <script>
-    let reviewTrendChart, sentimentBreakdownChart;
+    let reviewTrendChart, sentimentBreakdownChart, countrySentimentChart;
 
     async function fetchProductData() {
         const asin = document.getElementById("productSearch").value.trim();
@@ -203,6 +218,11 @@
                     ? Object.entries(data.competitor_mentions).map(([brand, count]) => `<li>${brand} (${count})</li>`).join("")
                     : "<li>No competitors found.</li>";
 
+            document.getElementById("helpfulReviews").innerHTML =
+                data.top_helpful_reviews.length
+                    ? data.top_helpful_reviews.map(r => `<li><strong>${r.title}</strong><br>${r.text}</li>`).join("<br><br>")
+                    : "<li>No helpful reviews found.</li>";
+
             updateCharts(data);
         } catch (err) {
             console.error("Error fetching data:", err);
@@ -214,6 +234,7 @@
     function updateCharts(data) {
         if (reviewTrendChart) reviewTrendChart.destroy();
         if (sentimentBreakdownChart) sentimentBreakdownChart.destroy();
+        if (countrySentimentChart) countrySentimentChart.destroy();
 
         const dateMap = {};
         data.review_dates.forEach((date, i) => {
@@ -254,6 +275,39 @@
                     ],
                     backgroundColor: ['green', 'red', 'blue']
                 }]
+            }
+        });
+
+        const ctxCountry = document.getElementById("countrySentimentChart").getContext("2d");
+        countrySentimentChart = new Chart(ctxCountry, {
+            type: 'bar',
+            data: {
+                labels: data.country_sentiment_chart.labels,
+                datasets: [
+                    {
+                        label: 'Positive %',
+                        data: data.country_sentiment_chart.positive,
+                        backgroundColor: 'green'
+                    },
+                    {
+                        label: 'Negative %',
+                        data: data.country_sentiment_chart.negative,
+                        backgroundColor: 'red'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                indexAxis: 'y',
+                scales: {
+                    x: {
+                        max: 100,
+                        title: { display: true, text: 'Percentage (%)' }
+                    },
+                    y: {
+                        title: { display: true, text: 'Country' }
+                    }
+                }
             }
         });
     }
