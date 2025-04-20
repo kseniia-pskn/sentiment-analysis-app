@@ -7,7 +7,9 @@ from transformers import pipeline
 from flask_login import current_user, login_required
 from .utils import extract_adjectives_and_competitors
 from .models import db, ReviewHistory, SentimentSnapshot
+from pprint import pprint
 import json
+from collections import defaultdict, Counter
 
 api = Blueprint('api', __name__)
 
@@ -32,14 +34,10 @@ LABEL_MAPPING = {
 def fetch_reviews():
     asin = request.args.get('asin')
     if not asin:
-        print("[DEBUG] ❌ No ASIN provided in request.")
         return jsonify({"error": "ASIN is required."}), 400
-
-    print(f"[DEBUG] 📦 ASIN requested: {asin} by user {current_user.id}")
 
     snapshot = SentimentSnapshot.query.filter_by(asin=asin, user_id=current_user.id).order_by(SentimentSnapshot.timestamp.desc()).first()
     if snapshot:
-        print("[DEBUG] ✅ Returning cached snapshot for ASIN:", asin)
         return jsonify(snapshot.to_dict())
 
     meta_payload = {
@@ -48,15 +46,10 @@ def fetch_reviews():
         'parse': True
     }
     meta_response = requests.post("https://realtime.oxylabs.io/v1/queries", auth=(USERNAME, PASSWORD), json=meta_payload)
-    print("[DEBUG] 🔄 Metadata status:", meta_response.status_code)
-
     if meta_response.status_code != 200:
-        print("[DEBUG] ❌ Failed to fetch metadata.")
         return jsonify({"error": "Failed to fetch product metadata."}), 401
 
-    meta_json = meta_response.json()
-    print("[DEBUG] 📦 Metadata response received:", json.dumps(meta_json, indent=2))
-    product = meta_json.get('results', [{}])[0].get('content', {})
+    product = meta_response.json().get('results', [{}])[0].get('content', {})
     product_name = product.get("title", "Unknown Product")
     manufacturer = product.get("manufacturer", "Unknown")
     price = product.get("price", 0.0)
@@ -71,59 +64,71 @@ def fetch_reviews():
         "parse": True
     }
     review_response = requests.post("https://realtime.oxylabs.io/v1/queries", auth=(USERNAME, PASSWORD), json=review_payload)
-    print("[DEBUG] 🔄 Reviews status:", review_response.status_code)
-
     if review_response.status_code != 200:
-        print("[DEBUG] ❌ Failed to fetch reviews.")
         return jsonify({"error": "Failed to fetch reviews."}), 401
 
-    review_json = review_response.json()
-    print("[DEBUG] 📦 Review response JSON:", json.dumps(review_json, indent=2))
+    reviews_data = review_response.json().get("results", [{}])[0].get("content", {}).get("reviews", [])
 
-    reviews_data = review_json.get("results", [{}])[0].get("content", {}).get("reviews", [])
-    reviews, review_dates = [], []
+    reviews, review_dates, countries = [], [], []
+    review_meta = []
 
     for r in reviews_data:
         content = r.get("content", "").strip()
         timestamp = r.get("timestamp", "").strip()
+        country = "USA"
+        if "Reviewed in" in timestamp:
+            try:
+                country = timestamp.split("Reviewed in")[-1].split("on")[0].strip()
+                date = timestamp.split("on")[-1].strip()
+            except:
+                date = "Unknown"
+        else:
+            date = timestamp
+
+        try:
+            formatted_date = datetime.strptime(date, "%B %d, %Y").strftime("%Y-%m-%d")
+        except:
+            formatted_date = "Unknown"
+
         if content:
             reviews.append(content)
-            try:
-                date = datetime.strptime(timestamp.replace("Reviewed in the United States", "").strip(), "%B %d, %Y").strftime("%Y-%m-%d")
-            except Exception as e:
-                print(f"[DEBUG] ⚠️ Date parse failed: {e}")
-                date = "Unknown"
-            review_dates.append(date)
+            review_dates.append(formatted_date)
+            countries.append(country)
+            review_meta.append({
+                "title": r.get("title", ""),
+                "content": content,
+                "helpful_count": r.get("helpful_count", 0),
+                "country": country
+            })
 
     if not reviews:
-        print("[DEBUG] ❌ No reviews parsed. Raw response:", json.dumps(review_json, indent=2))
         return jsonify({"error": "No reviews found."}), 404
 
-    print(f"[DEBUG] ✅ Parsed {len(reviews)} reviews")
-
     results = sentiment_analyzer(reviews, truncation=True, max_length=512, padding=True, batch_size=8)
-    print("[DEBUG] 🤖 Sentiment analysis results:", results)
 
     top_adjectives, competitor_mentions = extract_adjectives_and_competitors(reviews)
-    print(f"[DEBUG] 📈 Top adjectives: {top_adjectives}")
-    print(f"[DEBUG] 🏷 Competitor mentions: {competitor_mentions}")
 
     sentiment_counts = {"POSITIVE": 0, "NEGATIVE": 0, "NEUTRAL": 0}
     positive_scores, negative_scores, neutral_scores = [], [], []
 
-    for r in results:
+    country_sentiment = defaultdict(lambda: {"positive": 0, "negative": 0})
+
+    for i, r in enumerate(results):
         sentiment = LABEL_MAPPING.get(r["label"].upper(), "NEUTRAL")
         score = r["score"] * 10
         sentiment_counts[sentiment] += 1
+        country = countries[i]
 
         if sentiment == "POSITIVE":
             positive_scores.append(score)
             negative_scores.append(0)
             neutral_scores.append(0)
+            country_sentiment[country]["positive"] += 1
         elif sentiment == "NEGATIVE":
             positive_scores.append(0)
             negative_scores.append(score)
             neutral_scores.append(0)
+            country_sentiment[country]["negative"] += 1
         else:
             positive_scores.append(0)
             negative_scores.append(0)
@@ -135,6 +140,8 @@ def fetch_reviews():
     positive_percentage = round((sentiment_counts["POSITIVE"] / total_reviews) * 100, 2) if total_reviews else 0
     negative_percentage = round((sentiment_counts["NEGATIVE"] / total_reviews) * 100, 2) if total_reviews else 0
     neutral_percentage = round((sentiment_counts["NEUTRAL"] / total_reviews) * 100, 2) if total_reviews else 0
+
+    top_helpful_reviews = sorted(review_meta, key=lambda x: x.get("helpful_count", 0), reverse=True)[:3]
 
     try:
         history_entry = ReviewHistory(asin=asin, user_id=current_user.id)
@@ -159,30 +166,12 @@ def fetch_reviews():
         )
         db.session.add(snapshot)
         db.session.commit()
-        print("[DEBUG] ✅ Snapshot saved to database.")
     except Exception as e:
         db.session.rollback()
-        print(f"[DEBUG] ❌ Error saving snapshot to DB: {e}")
         return jsonify({"error": "Failed to save analysis."}), 500
 
-    return jsonify(snapshot.to_dict())
-
-
-@api.route('/debug-oxylabs-auth')
-def debug_oxylabs_auth():
-    if not USERNAME or not PASSWORD:
-        return jsonify({"error": "Missing credentials"}), 400
-
-    test_payload = {
-        "source": "amazon_product",
-        "query": "B0BTRWBVTH",
-        "parse": True
-    }
-    r = requests.post("https://realtime.oxylabs.io/v1/queries", auth=(USERNAME, PASSWORD), json=test_payload)
-    try:
-        return jsonify({
-            "status_code": r.status_code,
-            "response": r.json() if r.status_code != 401 else "Unauthorized"
-        })
-    except Exception as e:
-        return jsonify({"status_code": r.status_code, "error": str(e)})
+    return jsonify({
+        **snapshot.to_dict(),
+        "country_sentiment": dict(country_sentiment),
+        "top_helpful_reviews": top_helpful_reviews
+    })
