@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-import requests, os, json
+import requests, os, json, hashlib
 from datetime import datetime
 import numpy as np
 from transformers import pipeline
@@ -28,19 +28,70 @@ LABEL_MAPPING = {
     "NEUTRAL": "NEUTRAL"
 }
 
+def compute_review_hashes_and_filter(all_reviews, existing_snapshot):
+    print("🔎 Filtering new reviews based on hashes and dates...")
+    reviews, review_dates, countries, review_meta = [], [], [], []
+    existing_dates = set(json.loads(existing_snapshot.review_dates)) if existing_snapshot else set()
+    existing_hashes = set()
+
+    if existing_snapshot:
+        try:
+            old_reviews = json.loads(existing_snapshot.top_helpful_reviews)
+            for rev in old_reviews:
+                content_hash = hashlib.sha256(rev.get("content", "").strip().encode()).hexdigest()
+                existing_hashes.add(content_hash)
+            print(f"✅ Loaded {len(existing_hashes)} existing hashes.")
+        except Exception as e:
+            print(f"[WARNING] Failed to extract existing content hashes: {e}")
+
+    for r in all_reviews:
+        text = r.get("content", "").strip()
+        timestamp = r.get("timestamp", "").strip()
+        country = "USA"
+        date = timestamp
+        if "Reviewed in" in timestamp and "on" in timestamp:
+            try:
+                country = timestamp.split("Reviewed in")[1].split("on")[0].strip()
+                date = timestamp.split("on")[-1].strip()
+            except Exception as e:
+                print(f"[WARNING] Could not extract country or date: {e}")
+
+        try:
+            formatted = datetime.strptime(date, "%B %d, %Y").strftime("%Y-%m-%d")
+        except Exception:
+            formatted = None
+
+        content_hash = hashlib.sha256(text.encode()).hexdigest()
+
+        if text and content_hash not in existing_hashes:
+            reviews.append(text)
+            review_dates.append(formatted or "Unknown")
+            countries.append(country)
+            review_meta.append({
+                "title": r.get("title", ""),
+                "content": text,
+                "helpful_count": r.get("helpful_count", 0),
+                "country": country
+            })
+            existing_hashes.add(content_hash)
+
+    print(f"🧾 {len(reviews)} new reviews identified.")
+    return reviews, review_dates, countries, review_meta
+
 @api.route('/fetch_reviews', methods=['GET'])
 @login_required
 def fetch_reviews():
     asin = request.args.get('asin')
+    print(f"🔍 Requested ASIN: {asin}")
     if not asin:
         return jsonify({"error": "ASIN is required"}), 400
 
-    # Check for existing data
-    existing = SentimentSnapshot.query.filter_by(user_id=current_user.id, asin=asin)                                      .order_by(SentimentSnapshot.timestamp.desc())                                      .first()
-    existing_dates = set(json.loads(existing.review_dates)) if existing else set()
+    print("📦 Checking existing snapshots...")
+    existing = SentimentSnapshot.query.filter_by(user_id=current_user.id, asin=asin)\
+                                      .order_by(SentimentSnapshot.timestamp.desc()).first()
 
-    # Fetch product metadata
     try:
+        print("📦 Fetching product metadata...")
         meta_res = requests.post(
             "https://realtime.oxylabs.io/v1/queries",
             auth=(USERNAME, PASSWORD),
@@ -50,10 +101,12 @@ def fetch_reviews():
         product_name = product_data.get("title", "Unknown")
         manufacturer = product_data.get("manufacturer", "Unknown")
         price = product_data.get("price", 0.0)
-    except Exception:
+        print(f"🛍️ Product: {product_name} | Manufacturer: {manufacturer} | Price: {price}")
+    except Exception as e:
+        print(f"[ERROR] Failed to fetch metadata: {e}")
         return jsonify({"error": "Failed to fetch metadata"}), 500
 
-    # Fetch new reviews (ignore existing dates)
+    print("🔄 Fetching recent reviews...")
     all_reviews = []
     for page in range(1, 6):
         try:
@@ -70,40 +123,29 @@ def fetch_reviews():
                 }
             )
             data = resp.json()["results"][0]["content"]["reviews"]
+            print(f"📄 Page {page} reviews fetched: {len(data)}")
             all_reviews.extend(data)
-        except Exception:
+        except Exception as e:
+            print(f"[ERROR] Failed to fetch page {page} reviews: {e}")
             continue
 
-    reviews, review_dates, countries, review_meta = [], [], [], []
-    for r in all_reviews:
-        text = r.get("content", "").strip()
-        timestamp = r.get("timestamp", "")
-        date = timestamp.split("on")[-1].strip() if "on" in timestamp else timestamp
-        try:
-            formatted = datetime.strptime(date, "%B %d, %Y").strftime("%Y-%m-%d")
-        except:
-            formatted = "Unknown"
-        if text and formatted not in existing_dates:
-            reviews.append(text)
-            review_dates.append(formatted)
-            countries.append("USA")
-            review_meta.append({
-                "title": r.get("title", ""),
-                "content": text,
-                "helpful_count": r.get("helpful_count", 0),
-                "country": "USA"
-            })
+    reviews, review_dates, countries, review_meta = compute_review_hashes_and_filter(all_reviews, existing)
 
     if not reviews:
+        print("🛑 No new reviews to analyze.")
         return jsonify(existing.to_dict() if existing else {"message": "No new reviews."})
 
     try:
+        print("🤖 Running sentiment analysis...")
         sentiments = sentiment_analyzer(reviews, truncation=True, max_length=512, padding=True, batch_size=8)
+        print("📌 Sentiment analysis completed.")
         adjectives, competitor_mentions = extract_adjectives_and_competitors(reviews)
-    except Exception:
+    except Exception as e:
+        print(f"[ERROR] NLP processing failed: {e}")
         return jsonify({"error": "NLP failure"}), 500
 
     try:
+        print("💡 Fetching GPT competitor suggestions...")
         gpt_cache = CompetitorCache.query.filter_by(product_name=product_name, manufacturer=manufacturer).first()
         if gpt_cache:
             try:
@@ -115,13 +157,23 @@ def fetch_reviews():
                 gpt_competitors = []
         else:
             gpt_competitors = fetch_competitor_names(product_name, manufacturer)
-            db.session.add(CompetitorCache(product_name=product_name, manufacturer=manufacturer, names=json.dumps(gpt_competitors)))
-            db.session.commit()
+
+            if gpt_competitors:
+                db.session.add(CompetitorCache(
+                product_name=product_name,
+                manufacturer=manufacturer,
+                names=json.dumps(gpt_competitors)
+                ))
+                db.session.commit()
+            else:
+                print("[INFO] GPT returned no competitor names. Skipping cache save.")
         for comp in gpt_competitors:
             competitor_mentions[comp.lower()] += 1
-    except Exception:
+    except Exception as e:
+        print(f"[WARNING] GPT competitor fallback: {e}")
         gpt_competitors = []
 
+    print("📊 Aggregating sentiment metrics...")
     counts = {"POSITIVE": 0, "NEGATIVE": 0, "NEUTRAL": 0}
     pos, neg, neu = [], [], []
     country_sent = defaultdict(lambda: {"positive": 0, "negative": 0})
@@ -147,7 +199,10 @@ def fetch_reviews():
     neu_pct = round((counts["NEUTRAL"] / total) * 100, 2)
     top_helpful = sorted(review_meta, key=lambda x: x.get("helpful_count", 0), reverse=True)[:3]
 
+    print(f"📈 POS: {pos_pct}% | NEG: {neg_pct}% | NEU: {neu_pct}% | Median Score: {median}")
+
     try:
+        print("💾 Saving snapshot to database...")
         db.session.add(ReviewHistory(asin=asin, user_id=current_user.id))
         new_snapshot = SentimentSnapshot(
             asin=asin,
@@ -171,7 +226,9 @@ def fetch_reviews():
         )
         db.session.add(new_snapshot)
         db.session.commit()
+        print("✅ Snapshot saved successfully.")
         return jsonify(new_snapshot.to_dict())
-    except Exception:
+    except Exception as e:
         db.session.rollback()
+        print(f"[ERROR] Failed to save snapshot: {e}")
         return jsonify({"error": "DB commit failed."}), 500
