@@ -1,14 +1,13 @@
 from flask import Blueprint, request, jsonify
-import requests
-import os
-import numpy as np
+import requests, os, json
 from datetime import datetime
+import numpy as np
 from transformers import pipeline
 from flask_login import current_user, login_required
+from collections import defaultdict
+
 from .utils import extract_adjectives_and_competitors, fetch_competitor_names
 from .models import db, ReviewHistory, SentimentSnapshot, CompetitorCache
-from collections import defaultdict
-import json
 
 api = Blueprint('api', __name__)
 
@@ -33,210 +32,146 @@ LABEL_MAPPING = {
 @login_required
 def fetch_reviews():
     asin = request.args.get('asin')
-    print(f"🔍 Requested ASIN: {asin}")
     if not asin:
-        print("❌ No ASIN provided.")
-        return jsonify({"error": "ASIN is required."}), 400
+        return jsonify({"error": "ASIN is required"}), 400
 
+    # Check for existing data
+    existing = SentimentSnapshot.query.filter_by(user_id=current_user.id, asin=asin)                                      .order_by(SentimentSnapshot.timestamp.desc())                                      .first()
+    existing_dates = set(json.loads(existing.review_dates)) if existing else set()
+
+    # Fetch product metadata
     try:
-        print("🧹 Deleting previous snapshots for this user-ASIN combo...")
-        SentimentSnapshot.query.filter_by(asin=asin, user_id=current_user.id).delete()
-        db.session.commit()
-    except Exception as cleanup_err:
-        print("[WARNING] Could not clear old snapshots:", cleanup_err)
-        db.session.rollback()
+        meta_res = requests.post(
+            "https://realtime.oxylabs.io/v1/queries",
+            auth=(USERNAME, PASSWORD),
+            json={"source": "amazon_product", "query": asin, "parse": True}
+        )
+        product_data = meta_res.json()["results"][0]["content"]
+        product_name = product_data.get("title", "Unknown")
+        manufacturer = product_data.get("manufacturer", "Unknown")
+        price = product_data.get("price", 0.0)
+    except Exception:
+        return jsonify({"error": "Failed to fetch metadata"}), 500
 
-    # --------- Fetch Metadata ---------
-    print("📦 Fetching product metadata...")
-    meta_payload = {
-        'source': 'amazon_product',
-        'query': asin,
-        'parse': True
-    }
-    try:
-        meta_response = requests.post("https://realtime.oxylabs.io/v1/queries",
-                                      auth=(USERNAME, PASSWORD), json=meta_payload)
-        meta_response.raise_for_status()
-    except Exception as meta_err:
-        print("[ERROR] Failed to fetch metadata:", meta_err)
-        return jsonify({"error": "Failed to fetch product metadata."}), 500
-
-    product = meta_response.json().get('results', [{}])[0].get('content', {})
-    product_name = product.get("title", "Unknown Product")
-    manufacturer = product.get("manufacturer", "Unknown")
-    price = product.get("price", 0.0)
-    print(f"🛍️ Product: {product_name} | Manufacturer: {manufacturer} | Price: {price}")
-
-    # --------- Fetch Reviews ---------
-    reviews_data = []
-    print("🔄 Fetching reviews from 5 pages...")
+    # Fetch new reviews (ignore existing dates)
+    all_reviews = []
     for page in range(1, 6):
-        review_payload = {
-            "source": "amazon_reviews",
-            "query": asin,
-            "page": page,
-            "context": [{"key": "sort_by", "value": "recent"}],
-            "geo_location": "90210",
-            "parse": True
-        }
         try:
-            response = requests.post("https://realtime.oxylabs.io/v1/queries",
-                                     auth=(USERNAME, PASSWORD), json=review_payload)
-            response.raise_for_status()
-            page_reviews = response.json().get("results", [{}])[0].get("content", {}).get("reviews", [])
-            print(f"📄 Page {page} reviews fetched: {len(page_reviews)}")
-            reviews_data.extend(page_reviews)
-        except Exception as review_err:
-            print(f"[ERROR] Failed to fetch page {page} reviews:", review_err)
+            resp = requests.post(
+                "https://realtime.oxylabs.io/v1/queries",
+                auth=(USERNAME, PASSWORD),
+                json={
+                    "source": "amazon_reviews",
+                    "query": asin,
+                    "page": page,
+                    "context": [{"key": "sort_by", "value": "recent"}],
+                    "geo_location": "90210",
+                    "parse": True
+                }
+            )
+            data = resp.json()["results"][0]["content"]["reviews"]
+            all_reviews.extend(data)
+        except Exception:
+            continue
 
-    if not reviews_data:
-        print("❌ No reviews found.")
-        return jsonify({"error": "No reviews found."}), 404
-
-    print(f"🧾 Total reviews to process: {len(reviews_data)}")
     reviews, review_dates, countries, review_meta = [], [], [], []
-
-    for r in reviews_data:
-        content = r.get("content", "").strip()
-        timestamp = r.get("timestamp", "").strip()
-        country = "USA"
-        if "Reviewed in" in timestamp:
-            try:
-                country = timestamp.split("Reviewed in")[-1].split("on")[0].strip()
-                date = timestamp.split("on")[-1].strip()
-            except:
-                date = "Unknown"
-        else:
-            date = timestamp
-
+    for r in all_reviews:
+        text = r.get("content", "").strip()
+        timestamp = r.get("timestamp", "")
+        date = timestamp.split("on")[-1].strip() if "on" in timestamp else timestamp
         try:
-            formatted_date = datetime.strptime(date, "%B %d, %Y").strftime("%Y-%m-%d")
+            formatted = datetime.strptime(date, "%B %d, %Y").strftime("%Y-%m-%d")
         except:
-            formatted_date = "Unknown"
-
-        if content:
-            reviews.append(content)
-            review_dates.append(formatted_date)
-            countries.append(country)
+            formatted = "Unknown"
+        if text and formatted not in existing_dates:
+            reviews.append(text)
+            review_dates.append(formatted)
+            countries.append("USA")
             review_meta.append({
                 "title": r.get("title", ""),
-                "content": content,
+                "content": text,
                 "helpful_count": r.get("helpful_count", 0),
-                "country": country
+                "country": "USA"
             })
 
-    print(f"✍️ Reviews cleaned: {len(reviews)}")
+    if not reviews:
+        return jsonify(existing.to_dict() if existing else {"message": "No new reviews."})
 
     try:
-        print("🤖 Running sentiment analysis...")
-        results = sentiment_analyzer(reviews, truncation=True, max_length=512, padding=True, batch_size=8)
-    except Exception as sa_err:
-        print("[ERROR] Sentiment analysis failed:", sa_err)
-        return jsonify({"error": "Sentiment analysis failed."}), 500
+        sentiments = sentiment_analyzer(reviews, truncation=True, max_length=512, padding=True, batch_size=8)
+        adjectives, competitor_mentions = extract_adjectives_and_competitors(reviews)
+    except Exception:
+        return jsonify({"error": "NLP failure"}), 500
 
     try:
-        print("🔍 Extracting adjectives and competitors...")
-        top_adjectives, competitor_mentions = extract_adjectives_and_competitors(reviews)
-    except Exception as nlp_err:
-        print("[ERROR] Tokenization failed:", nlp_err)
-        top_adjectives, competitor_mentions = [], {}
-
-    # Check if GPT competitors are cached
-    gpt_competitors = []
-    try:
-        cache_entry = CompetitorCache.query.filter_by(product_name=product_name, manufacturer=manufacturer).first()
-        if cache_entry:
-            print("📦 Using cached GPT competitor names.")
-            gpt_competitors = json.loads(cache_entry.names)
+        gpt_cache = CompetitorCache.query.filter_by(product_name=product_name, manufacturer=manufacturer).first()
+        if gpt_cache:
+            try:
+                gpt_competitors = json.loads(gpt_cache.names)
+                if not isinstance(gpt_competitors, list):
+                    gpt_competitors = json.loads(gpt_competitors)
+            except Exception as parse_err:
+                print(f"[WARNING] Failed to parse GPT cache: {parse_err}")
+                gpt_competitors = []
         else:
-            print("💡 Fetching GPT competitor suggestions...")
             gpt_competitors = fetch_competitor_names(product_name, manufacturer)
-            db.session.add(CompetitorCache(
-                product_name=product_name,
-                manufacturer=manufacturer,
-                names=json.dumps(gpt_competitors)
-            ))
+            db.session.add(CompetitorCache(product_name=product_name, manufacturer=manufacturer, names=json.dumps(gpt_competitors)))
             db.session.commit()
         for comp in gpt_competitors:
             competitor_mentions[comp.lower()] += 1
-    except Exception as gpt_err:
-        print("[WARNING] GPT competitor name fetch failed:", gpt_err)
+    except Exception:
         gpt_competitors = []
 
-    sentiment_counts = {"POSITIVE": 0, "NEGATIVE": 0, "NEUTRAL": 0}
-    positive_scores, negative_scores, neutral_scores = [], [], []
-    country_sentiment = defaultdict(lambda: {"positive": 0, "negative": 0})
+    counts = {"POSITIVE": 0, "NEGATIVE": 0, "NEUTRAL": 0}
+    pos, neg, neu = [], [], []
+    country_sent = defaultdict(lambda: {"positive": 0, "negative": 0})
 
-    for i, r in enumerate(results):
-        sentiment = LABEL_MAPPING.get(r["label"].upper(), "NEUTRAL")
-        score = r["score"] * 10
-        sentiment_counts[sentiment] += 1
-        country = countries[i]
-
-        if sentiment == "POSITIVE":
-            positive_scores.append(score)
-            negative_scores.append(0)
-            neutral_scores.append(0)
-            country_sentiment[country]["positive"] += 1
-        elif sentiment == "NEGATIVE":
-            positive_scores.append(0)
-            negative_scores.append(score)
-            neutral_scores.append(0)
-            country_sentiment[country]["negative"] += 1
+    for i, s in enumerate(sentiments):
+        label = LABEL_MAPPING.get(s["label"].upper(), "NEUTRAL")
+        score = s["score"] * 10
+        counts[label] += 1
+        if label == "POSITIVE":
+            pos.append(score)
+            country_sent[countries[i]]["positive"] += 1
+        elif label == "NEGATIVE":
+            neg.append(score)
+            country_sent[countries[i]]["negative"] += 1
         else:
-            positive_scores.append(0)
-            negative_scores.append(0)
-            neutral_scores.append(score)
+            neu.append(score)
 
-    all_scores = positive_scores + negative_scores + neutral_scores
-    median_score = round(np.median([s for s in all_scores if s > 0]), 2) if all_scores else None
-    total_reviews = sum(sentiment_counts.values())
-    positive_percentage = round((sentiment_counts["POSITIVE"] / total_reviews) * 100, 2) if total_reviews else 0
-    negative_percentage = round((sentiment_counts["NEGATIVE"] / total_reviews) * 100, 2) if total_reviews else 0
-    neutral_percentage = round((sentiment_counts["NEUTRAL"] / total_reviews) * 100, 2) if total_reviews else 0
-
-    print(f"📊 Median Score: {median_score}")
-    print(f"👍 {positive_percentage}% | 👎 {negative_percentage}% | 😐 {neutral_percentage}%")
-
-    top_helpful_reviews = sorted(review_meta, key=lambda x: x.get("helpful_count", 0), reverse=True)[:3]
-    print(f"📌 Top helpful reviews: {len(top_helpful_reviews)}")
+    all_scores = pos + neg + neu
+    median = round(np.median([x for x in all_scores if x > 0]), 2)
+    total = sum(counts.values()) or 1
+    pos_pct = round((counts["POSITIVE"] / total) * 100, 2)
+    neg_pct = round((counts["NEGATIVE"] / total) * 100, 2)
+    neu_pct = round((counts["NEUTRAL"] / total) * 100, 2)
+    top_helpful = sorted(review_meta, key=lambda x: x.get("helpful_count", 0), reverse=True)[:3]
 
     try:
-        print("💾 Saving to database...")
-        history_entry = ReviewHistory(asin=asin, user_id=current_user.id)
-        db.session.add(history_entry)
-
-        snapshot = SentimentSnapshot(
+        db.session.add(ReviewHistory(asin=asin, user_id=current_user.id))
+        new_snapshot = SentimentSnapshot(
             asin=asin,
             user_id=current_user.id,
             product_name=product_name,
             manufacturer=manufacturer,
             price=price,
-            median_score=median_score,
-            top_adjectives=json.dumps(top_adjectives),
+            median_score=median,
+            top_adjectives=json.dumps(adjectives),
             competitor_mentions=json.dumps(dict(competitor_mentions)),
+            gpt_competitors=json.dumps(gpt_competitors),
             review_dates=json.dumps(review_dates),
-            positive_scores=json.dumps(positive_scores),
-            negative_scores=json.dumps(negative_scores),
-            neutral_scores=json.dumps(neutral_scores),
-            positive_percentage=positive_percentage,
-            negative_percentage=negative_percentage,
-            neutral_percentage=neutral_percentage,
-            country_sentiment=json.dumps(dict(country_sentiment)),
-            top_helpful_reviews=json.dumps(top_helpful_reviews),
-            gpt_competitors=json.dumps(gpt_competitors)
+            positive_scores=json.dumps(pos),
+            negative_scores=json.dumps(neg),
+            neutral_scores=json.dumps(neu),
+            positive_percentage=pos_pct,
+            negative_percentage=neg_pct,
+            neutral_percentage=neu_pct,
+            country_sentiment=json.dumps(dict(country_sent)),
+            top_helpful_reviews=json.dumps(top_helpful)
         )
-        db.session.add(snapshot)
+        db.session.add(new_snapshot)
         db.session.commit()
-        print("✅ Snapshot saved successfully.")
-    except Exception as e:
+        return jsonify(new_snapshot.to_dict())
+    except Exception:
         db.session.rollback()
-        print("[ERROR] Failed to save snapshot:", e)
-        return jsonify({"error": "Failed to save analysis."}), 500
-
-    print("🚀 Returning JSON payload to client.")
-    return jsonify({
-        **snapshot.to_dict(),
-        "country_sentiment": dict(country_sentiment),
-        "top_helpful_reviews": top_helpful_reviews
-    })
+        return jsonify({"error": "DB commit failed."}), 500

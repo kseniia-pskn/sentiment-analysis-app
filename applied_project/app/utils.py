@@ -5,13 +5,20 @@ import json
 from openai import OpenAI
 from collections import Counter
 
-# Optional: Load .env if running locally (uncomment if needed)
-# from dotenv import load_dotenv
-# load_dotenv()
-
 # Setup custom NLTK data path
 nltk_data_path = os.getenv("NLTK_DATA", "/opt/render/nltk_data")
 nltk.data.path.append(nltk_data_path)
+
+try:
+    nltk.data.find("tokenizers/punkt")
+    print("✅ NLTK resource 'punkt' is available.")
+except LookupError:
+    try:
+        print("⬇️ Downloading 'punkt'...")
+        nltk.download("punkt", download_dir=nltk_data_path)
+        print("✅ 'punkt' downloaded.")
+    except Exception as e:
+        print(f"[ERROR] Failed to download 'punkt': {e}")
 
 # Ensure NLTK models are available
 required_resources = [
@@ -123,7 +130,11 @@ def fetch_competitor_names(product_name, manufacturer):
         )
         result = response.choices[0].message.content.strip()
         print("✅ GPT response received.")
-        return json.loads(result)
+        parsed = json.loads(result)
+        if isinstance(parsed, list):
+            return parsed
+        print("[WARNING] GPT response was not a list. Returning empty.")
+        return []
     except Exception as e:
         print(f"[ERROR] GPT API call failed: {e}")
         return []
