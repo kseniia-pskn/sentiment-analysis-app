@@ -5,6 +5,7 @@ from .models import db, User
 import nltk
 import os
 
+
 def create_app():
     app = Flask(__name__, instance_relative_config=True)
 
@@ -18,24 +19,23 @@ def create_app():
     # Initialize SQLAlchemy
     db.init_app(app)
 
-    # Setup custom NLTK data path and download fallback resources
+    # Setup custom NLTK data path
     nltk_data_path = os.getenv("NLTK_DATA", "/opt/render/nltk_data")
     nltk.data.path.append(nltk_data_path)
+    try:
+        nltk.data.find('tokenizers/punkt')
+    except LookupError:
+        nltk.download('punkt', download_dir=nltk_data_path)
 
-    required_resources = [
-        ('tokenizers/punkt', 'punkt'),
-        ('corpora/stopwords', 'stopwords'),
-        ('taggers/averaged_perceptron_tagger', 'averaged_perceptron_tagger')
-    ]
+    try:
+        nltk.data.find('corpora/stopwords')
+    except LookupError:
+        nltk.download('stopwords', download_dir=nltk_data_path)
 
-    for res_path, res_name in required_resources:
-        try:
-            nltk.data.find(res_path)
-        except LookupError:
-            try:
-                nltk.download(res_name, download_dir=nltk_data_path)
-            except Exception as e:
-                print(f"⚠️ Failed to download NLTK resource '{res_name}':", e)
+    try:
+        nltk.data.find('taggers/averaged_perceptron_tagger')
+    except LookupError:
+        nltk.download('averaged_perceptron_tagger', download_dir=nltk_data_path)
 
     # Create database tables and confirm it
     with app.app_context():

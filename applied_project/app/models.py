@@ -3,6 +3,7 @@ from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 import json
 
+
 db = SQLAlchemy()
 
 # ---------------------
@@ -83,6 +84,8 @@ class SentimentSnapshot(db.Model):
     positive_percentage = db.Column(db.Float)
     negative_percentage = db.Column(db.Float)
     neutral_percentage = db.Column(db.Float)
+    country_sentiment = db.Column(db.Text)
+    top_helpful_reviews = db.Column(db.Text)
     timestamp = db.Column(db.DateTime, default=db.func.current_timestamp())
 
     def __repr__(self):
@@ -108,5 +111,7 @@ class SentimentSnapshot(db.Model):
             "neutral_scores": _safe_load(self.neutral_scores),
             "positive_percentage": self.positive_percentage,
             "negative_percentage": self.negative_percentage,
-            "neutral_percentage": self.neutral_percentage
+            "neutral_percentage": self.neutral_percentage,
+            "country_sentiment": _safe_load(self.country_sentiment),
+            "top_helpful_reviews": _safe_load(self.top_helpful_reviews)
         }
