@@ -5,7 +5,7 @@ import numpy as np
 from datetime import datetime
 from transformers import pipeline
 from flask_login import current_user, login_required
-from .utils import extract_adjectives_and_competitors
+from .utils import extract_adjectives_and_competitors, fetch_competitor_names
 from .models import db, ReviewHistory, SentimentSnapshot
 from collections import defaultdict
 import json
@@ -14,6 +14,7 @@ api = Blueprint('api', __name__)
 
 USERNAME = os.getenv("OXYLABS_USERNAME")
 PASSWORD = os.getenv("OXYLABS_PASSWORD")
+OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 
 sentiment_analyzer = pipeline("sentiment-analysis", model="cardiffnlp/twitter-roberta-base-sentiment-latest")
 
@@ -38,15 +39,12 @@ def fetch_reviews():
         return jsonify({"error": "ASIN is required."}), 400
 
     try:
-        snapshot = SentimentSnapshot.query.filter_by(
-            asin=asin, user_id=current_user.id
-        ).order_by(SentimentSnapshot.timestamp.desc()).first()
-
-        if snapshot:
-            print("✅ Returning cached snapshot.")
-            return jsonify(snapshot.to_dict())
-    except Exception as db_err:
-        print("[ERROR] Snapshot DB lookup failed:", db_err)
+        print("🧹 Deleting previous snapshots for this user-ASIN combo...")
+        SentimentSnapshot.query.filter_by(asin=asin, user_id=current_user.id).delete()
+        db.session.commit()
+    except Exception as cleanup_err:
+        print("[WARNING] Could not clear old snapshots:", cleanup_err)
+        db.session.rollback()
 
     # --------- Fetch Metadata ---------
     print("📦 Fetching product metadata...")
@@ -95,7 +93,6 @@ def fetch_reviews():
         print("❌ No reviews found.")
         return jsonify({"error": "No reviews found."}), 404
 
-    # --------- Process Reviews ---------
     print(f"🧾 Total reviews to process: {len(reviews_data)}")
     reviews, review_dates, countries, review_meta = [], [], [], []
 
@@ -130,7 +127,6 @@ def fetch_reviews():
 
     print(f"✍️ Reviews cleaned: {len(reviews)}")
 
-    # --------- Sentiment Analysis ---------
     try:
         print("🤖 Running sentiment analysis...")
         results = sentiment_analyzer(reviews, truncation=True, max_length=512, padding=True, batch_size=8)
@@ -138,7 +134,6 @@ def fetch_reviews():
         print("[ERROR] Sentiment analysis failed:", sa_err)
         return jsonify({"error": "Sentiment analysis failed."}), 500
 
-    # --------- NLP Feature Extraction ---------
     try:
         print("🔍 Extracting adjectives and competitors...")
         top_adjectives, competitor_mentions = extract_adjectives_and_competitors(reviews)
@@ -146,7 +141,15 @@ def fetch_reviews():
         print("[ERROR] Tokenization failed:", nlp_err)
         top_adjectives, competitor_mentions = [], {}
 
-    # --------- Build Sentiment Data ---------
+    try:
+        print("💡 Fetching GPT competitor suggestions...")
+        gpt_competitors = fetch_competitor_names(product_name, manufacturer)
+        for comp in gpt_competitors:
+            competitor_mentions[comp.lower()] += 1
+    except Exception as gpt_err:
+        print("[WARNING] GPT competitor name fetch failed:", gpt_err)
+        gpt_competitors = []
+
     sentiment_counts = {"POSITIVE": 0, "NEGATIVE": 0, "NEUTRAL": 0}
     positive_scores, negative_scores, neutral_scores = [], [], []
     country_sentiment = defaultdict(lambda: {"positive": 0, "negative": 0})
@@ -185,7 +188,6 @@ def fetch_reviews():
     top_helpful_reviews = sorted(review_meta, key=lambda x: x.get("helpful_count", 0), reverse=True)[:3]
     print(f"📌 Top helpful reviews: {len(top_helpful_reviews)}")
 
-    # --------- Save to DB ---------
     try:
         print("💾 Saving to database...")
         history_entry = ReviewHistory(asin=asin, user_id=current_user.id)
@@ -208,7 +210,8 @@ def fetch_reviews():
             negative_percentage=negative_percentage,
             neutral_percentage=neutral_percentage,
             country_sentiment=json.dumps(dict(country_sentiment)),
-            top_helpful_reviews=json.dumps(top_helpful_reviews)
+            top_helpful_reviews=json.dumps(top_helpful_reviews),
+            gpt_competitors=json.dumps(gpt_competitors)
         )
         db.session.add(snapshot)
         db.session.commit()

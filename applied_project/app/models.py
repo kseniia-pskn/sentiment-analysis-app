@@ -3,7 +3,6 @@ from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 import json
 
-
 db = SQLAlchemy()
 
 # ---------------------
@@ -77,6 +76,7 @@ class SentimentSnapshot(db.Model):
     median_score = db.Column(db.Float)
     top_adjectives = db.Column(db.Text)
     competitor_mentions = db.Column(db.Text)
+    gpt_competitors = db.Column(db.Text)
     review_dates = db.Column(db.Text)
     positive_scores = db.Column(db.Text)
     negative_scores = db.Column(db.Text)
@@ -92,11 +92,11 @@ class SentimentSnapshot(db.Model):
         return f"<Snapshot {self.asin} by User {self.user_id}>"
 
     def to_dict(self):
-        def _safe_load(field):
+        def _safe_load(field, default="[]"):
             try:
-                return json.loads(field or "[]")
+                return json.loads(field or default)
             except json.JSONDecodeError:
-                return []
+                return json.loads(default)
 
         return {
             "product_name": self.product_name,
@@ -104,7 +104,8 @@ class SentimentSnapshot(db.Model):
             "price": self.price,
             "median_score": self.median_score,
             "top_adjectives": _safe_load(self.top_adjectives),
-            "competitor_mentions": _safe_load(self.competitor_mentions),
+            "competitor_mentions": _safe_load(self.competitor_mentions, default="{}"),
+            "gpt_competitors": _safe_load(self.gpt_competitors),
             "review_dates": _safe_load(self.review_dates),
             "positive_scores": _safe_load(self.positive_scores),
             "negative_scores": _safe_load(self.negative_scores),
@@ -112,6 +113,6 @@ class SentimentSnapshot(db.Model):
             "positive_percentage": self.positive_percentage,
             "negative_percentage": self.negative_percentage,
             "neutral_percentage": self.neutral_percentage,
-            "country_sentiment": _safe_load(self.country_sentiment),
+            "country_sentiment_chart": _safe_load(self.country_sentiment, default="{}"),
             "top_helpful_reviews": _safe_load(self.top_helpful_reviews)
         }

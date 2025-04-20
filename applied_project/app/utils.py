@@ -1,9 +1,15 @@
 import nltk
 import spacy
 import os
+import json
+from openai import OpenAI
 from collections import Counter
 
-# Setup custom NLTK data path (for deployment environments like Render)
+# Optional: Load .env if running locally (uncomment if needed)
+# from dotenv import load_dotenv
+# load_dotenv()
+
+# Setup custom NLTK data path
 nltk_data_path = os.getenv("NLTK_DATA", "/opt/render/nltk_data")
 nltk.data.path.append(nltk_data_path)
 
@@ -41,7 +47,7 @@ except OSError:
         print(f"[ERROR] Failed to load SpaCy model: {e}")
         raise
 
-# Extract adjectives and competitor mentions
+# Extract adjectives and competitor mentions from reviews using NLTK and SpaCy
 def extract_adjectives_and_competitors(reviews):
     print("🔍 Starting extraction of adjectives and competitor mentions...")
     text = " ".join(reviews).lower()
@@ -78,5 +84,46 @@ def extract_adjectives_and_competitors(reviews):
 
     filtered_mentions = {k: v for k, v in competitor_mentions.items() if v > 0}
     print(f"✅ Filtered to {len(filtered_mentions)} valid competitor mentions.")
-
     return top_adjectives, filtered_mentions
+
+# Fetch competitor brand names using OpenAI GPT
+def fetch_competitor_names(product_name, manufacturer):
+    print(f"🤖 Calling GPT to fetch competitors for: {product_name} by {manufacturer}...")
+
+    openai_key = os.getenv("OPENAI_API_KEY")
+    if not openai_key:
+        print("[ERROR] OPENAI_API_KEY is missing from environment.")
+        return []
+
+    client = OpenAI(api_key=openai_key)
+
+    system_prompt = (
+        "You are a smart assistant integrated into a sentiment analysis tool for Amazon products. "
+        "Your task is to generate a list of competitor product names and common abbreviations of competing brands or models "
+        "based on the following input:\n\n"
+        f"- Product Name: {product_name}\n"
+        f"- Manufacturer: {manufacturer}\n\n"
+        "Use your general knowledge and logical inference to identify:\n"
+        "- Brands and manufacturers that make similar products.\n"
+        "- Popular or competing product names (e.g., suggest \"Cortez\" if analyzing \"Samba\").\n"
+        "- Common abbreviations and shorthand used by users to refer to those brands or products.\n\n"
+        "Respond strictly with a JSON array of strings. No explanations. No extra output.\n\n"
+        "Example:\n[\"Nike\", \"Cortez\", \"NB\", \"New Balance\", \"Asics\", \"Puma\"]"
+    )
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Product Name: {product_name}\nManufacturer: {manufacturer}"}
+            ],
+            temperature=0.4,
+            max_tokens=512
+        )
+        result = response.choices[0].message.content.strip()
+        print("✅ GPT response received.")
+        return json.loads(result)
+    except Exception as e:
+        print(f"[ERROR] GPT API call failed: {e}")
+        return []
