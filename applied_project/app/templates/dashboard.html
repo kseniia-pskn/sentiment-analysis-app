@@ -13,7 +13,6 @@
             background-color: #f1f1f1;
             color: #222;
         }
-
         header {
             display: flex;
             justify-content: space-between;
@@ -22,24 +21,20 @@
             background-color: #f8f8f8;
             border-bottom: 1px solid #e0e0e0;
         }
-
         header h1 {
             font-weight: 700;
             font-size: 1.8em;
             margin: 0;
         }
-
         .nav-links {
             display: flex;
             gap: 20px;
         }
-
         .nav-links a {
             text-decoration: none;
             color: #333;
             font-weight: 500;
         }
-
         .container {
             max-width: 1200px;
             margin: 40px auto;
@@ -48,12 +43,10 @@
             border-radius: 14px;
             box-shadow: 0 5px 20px rgba(0, 0, 0, 0.07);
         }
-
         h2 {
             margin-top: 0;
             font-size: 1.5em;
         }
-
         input[type="text"] {
             padding: 10px;
             font-size: 1em;
@@ -61,7 +54,6 @@
             border: 1px solid #ccc;
             border-radius: 8px;
         }
-
         button {
             padding: 10px 20px;
             font-size: 1em;
@@ -73,43 +65,34 @@
             cursor: pointer;
             transition: background-color 0.2s;
         }
-
         button:hover {
             background-color: #333;
         }
-
         .section {
             margin-top: 40px;
         }
-
         ul {
             padding-left: 20px;
         }
-
         .chart-container {
             width: 100%;
             margin: 40px 0;
         }
-
         canvas {
             max-width: 100%;
         }
-
         .flex-group {
             display: flex;
             gap: 40px;
             flex-wrap: wrap;
         }
-
         .flex-item {
             flex: 1 1 300px;
         }
-
         .info-box span {
             display: block;
             margin-bottom: 6px;
         }
-
         #loadingSpinner {
             display: none;
             flex-direction: column;
@@ -124,11 +107,9 @@
             background-color: rgba(255,255,255,0.9);
             z-index: 1000;
         }
-
         #loadingSpinner svg {
             animation: spin 1s linear infinite;
         }
-
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
@@ -147,7 +128,7 @@
 
 <div id="loadingSpinner">
     <svg width="50" height="50" viewBox="0 0 100 100" fill="none">
-        <circle cx="50" cy="50" r="35" stroke="#111" stroke-width="10" stroke-linecap="round" stroke-dasharray="164.93361431346415 56.97787143782138">
+        <circle cx="50" cy="50" r="35" stroke="#111" stroke-width="10" stroke-linecap="round" stroke-dasharray="165 57">
             <animateTransform attributeName="transform" type="rotate" repeatCount="indefinite" dur="1s"
                               values="0 50 50;360 50 50" keyTimes="0;1"></animateTransform>
         </circle>
@@ -201,6 +182,8 @@
         document.getElementById("mainContainer").style.display = "block";
     });
 
+    let reviewTrendChart, sentimentBreakdownChart, countrySentimentChart;
+
     async function fetchProductData() {
         const asin = document.getElementById("productSearch").value.trim();
         if (!asin) return alert("Please enter an ASIN.");
@@ -239,7 +222,7 @@
             document.getElementById("competitorMentions").innerHTML =
                 Object.keys(data.competitor_mentions).length
                     ? Object.entries(data.competitor_mentions).map(([brand, count]) => `<li>${brand} (${count})</li>`).join("")
-                    : "<li>No competitors found.</li>";
+                    : "<li>No competitor mentions found.</li>";
 
             document.getElementById("helpfulReviews").innerHTML =
                 data.top_helpful_reviews.length
@@ -247,7 +230,6 @@
                     : "<li>No helpful reviews found.</li>";
 
             updateCharts(data);
-
         } catch (err) {
             console.error("Error fetching data:", err);
             document.getElementById("error-message").innerText = "Something went wrong.";
@@ -257,22 +239,16 @@
         }
     }
 
-    function logout() {
-        fetch('/auth/logout', {
-            method: 'POST',
-            credentials: 'include'
-        }).then(() => {
-            window.location.href = '/auth/login';
-        }).catch(err => {
-            alert('Logout failed');
-            console.error(err);
-        });
-    }
-
     function updateCharts(data) {
-        if (window.sentimentBreakdownChart) window.sentimentBreakdownChart.destroy();
-        if (window.reviewTrendChart) window.reviewTrendChart.destroy();
-        if (window.countrySentimentChart) window.countrySentimentChart.destroy();
+        if (window.sentimentBreakdownChart && typeof window.sentimentBreakdownChart.destroy === 'function') {
+            window.sentimentBreakdownChart.destroy();
+        }
+        if (window.reviewTrendChart && typeof window.reviewTrendChart.destroy === 'function') {
+            window.reviewTrendChart.destroy();
+        }
+        if (window.countrySentimentChart && typeof window.countrySentimentChart.destroy === 'function') {
+            window.countrySentimentChart.destroy();
+        }
 
         const breakdownCtx = document.getElementById('sentimentBreakdownChart').getContext('2d');
         window.sentimentBreakdownChart = new Chart(breakdownCtx, {
@@ -345,18 +321,21 @@
         const countryNegative = countryLabels.map(c => data.country_sentiment[c].negative || 0);
 
         window.countrySentimentChart = new Chart(countryCtx, {
-            type: 'doughnut',
+            type: 'bar',
             data: {
                 labels: countryLabels,
-                datasets: [{
-                    label: 'Positive',
-                    data: countryPositive,
-                    backgroundColor: countryLabels.map(() => '#4caf50')
-                }, {
-                    label: 'Negative',
-                    data: countryNegative,
-                    backgroundColor: countryLabels.map(() => '#f44336')
-                }]
+                datasets: [
+                    {
+                        label: 'Positive',
+                        data: countryPositive,
+                        backgroundColor: '#4caf50'
+                    },
+                    {
+                        label: 'Negative',
+                        data: countryNegative,
+                        backgroundColor: '#f44336'
+                    }
+                ]
             },
             options: {
                 responsive: true,
@@ -365,8 +344,25 @@
                         display: true,
                         text: 'Sentiment by Country'
                     }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
                 }
             }
+        });
+    }
+
+    function logout() {
+        fetch('/auth/logout', {
+            method: 'POST',
+            credentials: 'include'
+        }).then(() => {
+            window.location.href = '/auth/login';
+        }).catch(err => {
+            alert('Logout failed');
+            console.error(err);
         });
     }
 </script>
