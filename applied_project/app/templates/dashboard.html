@@ -229,6 +229,9 @@
                     ? data.top_helpful_reviews.map(r => `<li><strong>${r.title}</strong><br>${r.content}</li>`).join("<br><br>")
                     : "<li>No helpful reviews found.</li>";
 
+            
+            console.log("country_sentiment:", data.country_sentiment);
+        
             updateCharts(data);
         } catch (err) {
             console.error("Error fetching data:", err);
@@ -289,17 +292,17 @@
                 labels: data.review_dates,
                 datasets: [{
                     label: 'Positive',
-                    data: JSON.parse(data.positive_scores),
+                    data: data.positive_scores,
                     borderColor: '#4caf50',
                     fill: false
                 }, {
                     label: 'Negative',
-                    data: JSON.parse(data.negative_scores),
+                    data: data.positive_scores,
                     borderColor: '#f44336',
                     fill: false
                 }, {
                     label: 'Neutral',
-                    data: JSON.parse(data.neutral_scores),
+                    data: data.positive_scores,
                     borderColor: '#9e9e9e',
                     fill: false
                 }]
