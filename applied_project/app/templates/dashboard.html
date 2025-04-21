@@ -88,7 +88,11 @@
 
         .chart-container {
             width: 100%;
-            margin: 20px 0;
+            margin: 40px 0;
+        }
+
+        canvas {
+            max-width: 100%;
         }
 
         .flex-group {
@@ -158,7 +162,36 @@
     <p id="error-message" style="color:red; display:none;"></p>
 
     <div id="output-section" style="display:none;">
-        <!-- content unchanged -->
+        <h3>Product Information</h3>
+        <p><strong>Name:</strong> <span id="productName"></span></p>
+        <p><strong>Manufacturer:</strong> <span id="manufacturer"></span></p>
+        <p><strong>Price:</strong> $<span id="price"></span></p>
+        <p><strong>Total Reviews:</strong> <span id="totalReviews"></span></p>
+        <p><strong>Median Score:</strong> <span id="medianScore"></span></p>
+
+        <h3>Top Adjectives</h3>
+        <ul id="topAdjectives"></ul>
+
+        <h3>Competitor Mentions</h3>
+        <ul id="competitorMentions"></ul>
+
+        <h3>Top Helpful Reviews</h3>
+        <ul id="helpfulReviews"></ul>
+
+        <div class="chart-container">
+            <h3>Sentiment Breakdown</h3>
+            <canvas id="sentimentBreakdownChart"></canvas>
+        </div>
+
+        <div class="chart-container">
+            <h3>Sentiment Over Time</h3>
+            <canvas id="reviewTrendChart"></canvas>
+        </div>
+
+        <div class="chart-container">
+            <h3>Sentiment by Country</h3>
+            <canvas id="countrySentimentChart"></canvas>
+        </div>
     </div>
 </div>
 
@@ -167,8 +200,6 @@
         document.getElementById("loadingSpinner").style.display = "none";
         document.getElementById("mainContainer").style.display = "block";
     });
-
-    let reviewTrendChart, sentimentBreakdownChart, countrySentimentChart;
 
     async function fetchProductData() {
         const asin = document.getElementById("productSearch").value.trim();
@@ -215,7 +246,7 @@
                     ? data.top_helpful_reviews.map(r => `<li><strong>${r.title}</strong><br>${r.content}</li>`).join("<br><br>")
                     : "<li>No helpful reviews found.</li>";
 
-            // updateCharts(data); <-- your chart rendering logic should go here
+            updateCharts(data);
 
         } catch (err) {
             console.error("Error fetching data:", err);
@@ -235,6 +266,107 @@
         }).catch(err => {
             alert('Logout failed');
             console.error(err);
+        });
+    }
+
+    function updateCharts(data) {
+        if (window.sentimentBreakdownChart) window.sentimentBreakdownChart.destroy();
+        if (window.reviewTrendChart) window.reviewTrendChart.destroy();
+        if (window.countrySentimentChart) window.countrySentimentChart.destroy();
+
+        const breakdownCtx = document.getElementById('sentimentBreakdownChart').getContext('2d');
+        window.sentimentBreakdownChart = new Chart(breakdownCtx, {
+            type: 'bar',
+            data: {
+                labels: ['Positive', 'Negative', 'Neutral'],
+                datasets: [{
+                    label: 'Sentiment (%)',
+                    data: [
+                        data.positive_percentage,
+                        data.negative_percentage,
+                        data.neutral_percentage
+                    ],
+                    backgroundColor: ['#4caf50', '#f44336', '#9e9e9e']
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Sentiment Breakdown'
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 100
+                    }
+                }
+            }
+        });
+
+        const trendCtx = document.getElementById('reviewTrendChart').getContext('2d');
+        window.reviewTrendChart = new Chart(trendCtx, {
+            type: 'line',
+            data: {
+                labels: data.review_dates,
+                datasets: [{
+                    label: 'Positive',
+                    data: JSON.parse(data.positive_scores),
+                    borderColor: '#4caf50',
+                    fill: false
+                }, {
+                    label: 'Negative',
+                    data: JSON.parse(data.negative_scores),
+                    borderColor: '#f44336',
+                    fill: false
+                }, {
+                    label: 'Neutral',
+                    data: JSON.parse(data.neutral_scores),
+                    borderColor: '#9e9e9e',
+                    fill: false
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Sentiment Over Time'
+                    }
+                }
+            }
+        });
+
+        const countryCtx = document.getElementById('countrySentimentChart').getContext('2d');
+        const countryLabels = Object.keys(data.country_sentiment || {});
+        const countryPositive = countryLabels.map(c => data.country_sentiment[c].positive || 0);
+        const countryNegative = countryLabels.map(c => data.country_sentiment[c].negative || 0);
+
+        window.countrySentimentChart = new Chart(countryCtx, {
+            type: 'doughnut',
+            data: {
+                labels: countryLabels,
+                datasets: [{
+                    label: 'Positive',
+                    data: countryPositive,
+                    backgroundColor: countryLabels.map(() => '#4caf50')
+                }, {
+                    label: 'Negative',
+                    data: countryNegative,
+                    backgroundColor: countryLabels.map(() => '#f44336')
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Sentiment by Country'
+                    }
+                }
+            }
         });
     }
 </script>
