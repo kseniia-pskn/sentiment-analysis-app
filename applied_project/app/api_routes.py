@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-import requests, os, json, hashlib
+import requests, os, json, hashlib, re
 from datetime import datetime
 import numpy as np
 from transformers import pipeline
@@ -48,24 +48,30 @@ def compute_review_hashes_and_filter(all_reviews, existing_snapshot):
         text = r.get("content", "").strip()
         timestamp = r.get("timestamp", "").strip()
         country = "USA"
-        date = timestamp
+        formatted = "Unknown"
+
         if "Reviewed in" in timestamp and "on" in timestamp:
             try:
                 country = timestamp.split("Reviewed in")[1].split("on")[0].strip()
                 date = timestamp.split("on")[-1].strip()
+                formatted = datetime.strptime(date, "%B %d, %Y").strftime("%Y-%m-%d")
             except Exception as e:
-                print(f"[WARNING] Could not extract country or date: {e}")
-
-        try:
-            formatted = datetime.strptime(date, "%B %d, %Y").strftime("%Y-%m-%d")
-        except Exception:
-            formatted = None
+                print(f"[WARNING] Failed to parse date from standard format: {timestamp} | {e}")
+        else:
+            # Attempt regex fallback
+            try:
+                date_match = re.search(r'on\s([A-Za-z]+\s\d{1,2},\s\d{4})', timestamp)
+                if date_match:
+                    date_str = date_match.group(1)
+                    formatted = datetime.strptime(date_str, "%B %d, %Y").strftime("%Y-%m-%d")
+            except Exception as e:
+                print(f"[WARNING] Regex fallback failed for timestamp: {timestamp} | {e}")
 
         content_hash = hashlib.sha256(text.encode()).hexdigest()
 
         if text and content_hash not in existing_hashes:
             reviews.append(text)
-            review_dates.append(formatted or "Unknown")
+            review_dates.append(formatted)
             countries.append(country)
             review_meta.append({
                 "title": r.get("title", ""),
@@ -157,12 +163,11 @@ def fetch_reviews():
                 gpt_competitors = []
         else:
             gpt_competitors = fetch_competitor_names(product_name, manufacturer)
-
             if gpt_competitors:
                 db.session.add(CompetitorCache(
-                product_name=product_name,
-                manufacturer=manufacturer,
-                names=json.dumps(gpt_competitors)
+                    product_name=product_name,
+                    manufacturer=manufacturer,
+                    names=json.dumps(gpt_competitors)
                 ))
                 db.session.commit()
             else:
