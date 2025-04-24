@@ -117,11 +117,16 @@
       <h3>Sentiment Breakdown</h3>
       <canvas id="sentimentBreakdownChart"></canvas>
     </div>
+    <h3>Competitor Mentions</h3>
+    <ul id="competitorMentions"></ul>
+
     {% if sentiment_chart %}
     <h3>Sentiment Breakdown</h3>
     <img src="{{ sentiment_chart }}" alt="Sentiment Breakdown Chart">
   {% endif %}
-  
+  <h3>Competitor Mentions</h3>
+    <ul id="competitorMentions"></ul>
+    
     <div class="chart-container">
       <h3>Sentiment Over Time</h3>
       <canvas id="reviewTrendChart"></canvas>
@@ -143,65 +148,75 @@
   });
 
   async function fetchProductData() {
-    const asin = document.getElementById("productSearch").value.trim();
-    if (!asin) return alert("Please enter an ASIN.");
+  const asin = document.getElementById("productSearch").value.trim();
+  if (!asin) return alert("Please enter an ASIN.");
 
-    document.getElementById("loadingSpinner").style.display = "flex";
-    document.getElementById("mainContainer").style.display = "none";
+  document.getElementById("loadingSpinner").style.display = "flex";
+  document.getElementById("mainContainer").style.display = "none";
 
-    try {
-      const res = await fetch(`/api/fetch_reviews?asin=${asin}`);
-      const data = await res.json();
+  try {
+    const res = await fetch(`/api/fetch_reviews?asin=${asin}`);
+    const contentType = res.headers.get("content-type") || "";
 
-      document.getElementById("loadingSpinner").style.display = "none";
-      document.getElementById("mainContainer").style.display = "block";
-
-      if (data.error) {
-        document.getElementById("error-message").innerText = data.error;
-        document.getElementById("error-message").style.display = "block";
-        document.getElementById("output-section").style.display = "none";
-        return;
-      }
-
-      document.getElementById("error-message").style.display = "none";
-      document.getElementById("output-section").style.display = "block";
-
-      document.getElementById("productName").innerText = data.product_name || "-";
-      document.getElementById("manufacturer").innerText = data.manufacturer || "-";
-      document.getElementById("price").innerText = data.price || "-";
-      document.getElementById("totalReviews").innerText = data.review_dates?.length || "0";
-      document.getElementById("medianScore").innerText = data.median_score || "-";
-
-      document.getElementById("topAdjectives").innerHTML =
-        Array.isArray(data.top_adjectives) && data.top_adjectives.length
-          ? data.top_adjectives.map(([word, count]) => `<li>${word} (${count})</li>`).join("")
-          : "<li>No adjectives found.</li>";
-
-      document.getElementById("competitorMentions").innerHTML =
-        Object.keys(data.competitor_mentions || {}).length
-          ? Object.entries(data.competitor_mentions).map(([brand, count]) => `<li>${brand} (${count})</li>`).join("")
-          : "<li>No competitors found.</li>";
-
-      document.getElementById("helpfulReviews").innerHTML =
-        Array.isArray(data.top_helpful_reviews) && data.top_helpful_reviews.length
-          ? data.top_helpful_reviews.map(r => `
-              <li>
-                <strong>${r.title}</strong><br>
-                ${r.content}<br>
-                <em>👍 Helpful Votes: ${r.helpful_count || 0}</em>
-              </li>
-            `).join("<br><br>")
-          : "<li>No helpful reviews found.</li>";
-
-      updateCharts(data);
-    } catch (err) {
-      console.error("Error fetching data:", err);
-      document.getElementById("error-message").innerText = "Something went wrong.";
-      document.getElementById("error-message").style.display = "block";
-      document.getElementById("loadingSpinner").style.display = "none";
-      document.getElementById("mainContainer").style.display = "block";
+    if (!contentType.includes("application/json")) {
+      const text = await res.text();
+      throw new Error(`Expected JSON but got: ${contentType}\n\n${text}`);
     }
+
+    const data = await res.json();
+
+    document.getElementById("loadingSpinner").style.display = "none";
+    document.getElementById("mainContainer").style.display = "block";
+
+    if (data.error) {
+      document.getElementById("error-message").innerText = data.error;
+      document.getElementById("error-message").style.display = "block";
+      document.getElementById("output-section").style.display = "none";
+      return;
+    }
+
+    document.getElementById("error-message").style.display = "none";
+    document.getElementById("output-section").style.display = "block";
+
+    // [Keep the rest of your UI rendering logic the same]
+    document.getElementById("productName").innerText = data.product_name || "-";
+    document.getElementById("manufacturer").innerText = data.manufacturer || "-";
+    document.getElementById("price").innerText = data.price || "-";
+    document.getElementById("totalReviews").innerText = data.review_dates?.length || "0";
+    document.getElementById("medianScore").innerText = data.median_score || "-";
+
+    document.getElementById("topAdjectives").innerHTML =
+      Array.isArray(data.top_adjectives) && data.top_adjectives.length
+        ? data.top_adjectives.map(([word, count]) => `<li>${word} (${count})</li>`).join("")
+        : "<li>No adjectives found.</li>";
+
+    document.getElementById("competitorMentions").innerHTML =
+      Object.entries(data.competitor_mentions || {}).length
+        ? Object.entries(data.competitor_mentions).map(([brand, count]) => `<li>${brand} (${count})</li>`).join("")
+        : "<li>No competitors found.</li>";
+
+    document.getElementById("helpfulReviews").innerHTML =
+      Array.isArray(data.top_helpful_reviews) && data.top_helpful_reviews.length
+        ? data.top_helpful_reviews.map(r => `
+            <li>
+              <strong>${r.title}</strong><br>
+              ${r.content}<br>
+              <em>👍 Helpful Votes: ${r.helpful_count || 0}</em>
+            </li>
+          `).join("<br><br>")
+        : "<li>No helpful reviews found.</li>";
+
+    updateCharts(data);
+  } catch (err) {
+    console.error("🚨 Error fetching or parsing data:", err);
+    document.getElementById("error-message").innerText = err.message || "Something went wrong.";
+    document.getElementById("error-message").style.display = "block";
+    document.getElementById("loadingSpinner").style.display = "none";
+    document.getElementById("mainContainer").style.display = "block";
   }
+}
+;
+
 
   function updateCharts(data) {
     try { sentimentBreakdownChart?.destroy(); } catch {}
