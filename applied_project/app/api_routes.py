@@ -8,48 +8,29 @@ import spacy
 from transformers import pipeline
 
 from .models import db, ReviewHistory, SentimentSnapshot, CompetitorCache
-from .utils import fetch_competitor_names
+from .utils import fetch_competitor_names, extract_adjectives_and_competitors
 
 api = Blueprint('api', __name__)
 
 USERNAME = os.getenv("OXYLABS_USERNAME")
 PASSWORD = os.getenv("OXYLABS_PASSWORD")
 
-# Load SpaCy model once
 nlp = spacy.load("en_core_web_sm")
-
-# Sentiment pipeline
 sentiment_analyzer = pipeline("sentiment-analysis", model="cardiffnlp/twitter-roberta-base-sentiment-latest")
 
-# Unified label mapping
 LABEL_MAPPING = {
     "LABEL_0": "VERY NEGATIVE", "LABEL_1": "NEGATIVE", "LABEL_2": "NEUTRAL",
     "LABEL_3": "POSITIVE", "LABEL_4": "VERY POSITIVE",
     "NEGATIVE": "NEGATIVE", "POSITIVE": "POSITIVE", "NEUTRAL": "NEUTRAL"
 }
 
-# Extracts adjectives and competitor mentions
-def extract_adjectives_and_competitors(reviews):
-    adjectives = Counter()
-    competitor_mentions = Counter()
-    for review in reviews:
-        doc = nlp(review)
-        for token in doc:
-            if token.pos_ == "ADJ":
-                adjectives[token.lemma_.lower()] += 1
-            elif token.ent_type_ == "ORG":
-                competitor_mentions[token.text.lower()] += 1
-    return adjectives.most_common(15), dict(competitor_mentions)
-
-# Hash and dedup review content
 def compute_review_hashes_and_filter(all_reviews, existing_snapshot):
     reviews, review_dates, countries, review_meta = [], [], [], []
     existing_hashes = set()
 
     if existing_snapshot:
         try:
-            old_reviews = json.loads(existing_snapshot.top_helpful_reviews)
-            for rev in old_reviews:
+            for rev in json.loads(existing_snapshot.top_helpful_reviews or "[]"):
                 h = hashlib.sha256(rev.get("content", "").strip().encode()).hexdigest()
                 existing_hashes.add(h)
         except: pass
@@ -95,7 +76,11 @@ def fetch_reviews():
     if not asin:
         return jsonify({"error": "ASIN is required"}), 400
 
-    existing = SentimentSnapshot.query.filter_by(user_id=current_user.id, asin=asin).order_by(SentimentSnapshot.timestamp.desc()).first()
+    try:
+        existing = SentimentSnapshot.query.filter_by(user_id=current_user.id, asin=asin)\
+            .order_by(SentimentSnapshot.timestamp.desc()).first()
+    except Exception as e:
+        return jsonify({"error": f"Database error: {str(e)}"}), 500
 
     try:
         meta = requests.post(
@@ -107,8 +92,8 @@ def fetch_reviews():
         product_name = product_data.get("title", "Unknown")
         manufacturer = product_data.get("manufacturer", "Unknown")
         price = product_data.get("price", 0.0)
-    except:
-        return jsonify({"error": "Failed to fetch metadata"}), 500
+    except Exception as e:
+        return jsonify({"error": f"Failed to fetch metadata: {str(e)}"}), 500
 
     all_reviews = []
     for page in range(1, 6):
@@ -117,13 +102,17 @@ def fetch_reviews():
                 "https://realtime.oxylabs.io/v1/queries",
                 auth=(USERNAME, PASSWORD),
                 json={
-                    "source": "amazon_reviews", "query": asin,
-                    "page": page, "context": [{"key": "sort_by", "value": "recent"}],
-                    "geo_location": "90210", "parse": True
+                    "source": "amazon_reviews",
+                    "query": asin,
+                    "page": page,
+                    "context": [{"key": "sort_by", "value": "recent"}],
+                    "geo_location": "90210",
+                    "parse": True
                 }
             )
             all_reviews.extend(resp.json()["results"][0]["content"]["reviews"])
-        except:
+        except Exception as e:
+            print(f"[WARNING] Failed to fetch page {page}: {e}")
             continue
 
     reviews, review_dates, countries, review_meta = compute_review_hashes_and_filter(all_reviews, existing)
@@ -133,8 +122,8 @@ def fetch_reviews():
     try:
         sentiments = sentiment_analyzer(reviews, truncation=True, max_length=512, padding=True, batch_size=8)
         adjectives, competitor_mentions = extract_adjectives_and_competitors(reviews)
-    except:
-        return jsonify({"error": "NLP failure"}), 500
+    except Exception as e:
+        return jsonify({"error": f"NLP failure: {str(e)}"}), 500
 
     try:
         gpt_cache = CompetitorCache.query.filter_by(product_name=product_name, manufacturer=manufacturer).first()
@@ -151,8 +140,9 @@ def fetch_reviews():
                 db.session.commit()
         for comp in gpt_competitors:
             competitor_mentions[comp.lower()] += 1
-    except:
+    except Exception as e:
         gpt_competitors = []
+        print(f"[WARNING] GPT competitor fetch failed: {e}")
 
     counts = {"POSITIVE": 0, "NEGATIVE": 0, "NEUTRAL": 0}
     pos, neg, neu = [], [], []
@@ -206,4 +196,4 @@ def fetch_reviews():
         return jsonify(snapshot.to_dict())
     except Exception as e:
         db.session.rollback()
-        return jsonify({"error": "DB commit failed"}), 500
+        return jsonify({"error": f"DB commit failed: {str(e)}"}), 500
