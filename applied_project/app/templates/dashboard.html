@@ -80,7 +80,7 @@
 </header>
 
 <div id="loadingSpinner">
-  <svg width="50" height="50" viewBox="0 0 100 100">
+  <svg width="50" height="50" viewBox="0 0 100 100" aria-label="Loading spinner">
     <circle cx="50" cy="50" r="35" stroke="#111" stroke-width="10" fill="none" stroke-linecap="round"
             stroke-dasharray="165 57">
       <animateTransform attributeName="transform" type="rotate" repeatCount="indefinite" dur="1s"
@@ -117,16 +117,11 @@
       <h3>Sentiment Breakdown</h3>
       <canvas id="sentimentBreakdownChart"></canvas>
     </div>
-    <h3>Competitor Mentions</h3>
-    <ul id="competitorMentions"></ul>
 
     {% if sentiment_chart %}
-    <h3>Sentiment Breakdown</h3>
-    <img src="{{ sentiment_chart }}" alt="Sentiment Breakdown Chart">
-  {% endif %}
-  <h3>Competitor Mentions</h3>
-    <ul id="competitorMentions"></ul>
-    
+      <img src="{{ sentiment_chart }}" alt="Sentiment Breakdown Chart (Static fallback)">
+    {% endif %}
+
     <div class="chart-container">
       <h3>Sentiment Over Time</h3>
       <canvas id="reviewTrendChart"></canvas>
@@ -148,83 +143,71 @@
   });
 
   async function fetchProductData() {
-  const asin = document.getElementById("productSearch").value.trim();
-  if (!asin) return alert("Please enter an ASIN.");
+    const asin = document.getElementById("productSearch").value.trim();
+    if (!asin) return alert("Please enter an ASIN.");
 
-  document.getElementById("loadingSpinner").style.display = "flex";
-  document.getElementById("mainContainer").style.display = "none";
+    document.getElementById("loadingSpinner").style.display = "flex";
+    document.getElementById("mainContainer").style.display = "none";
 
-  try {
-    const res = await fetch(`/api/fetch_reviews?asin=${asin}`);
-    const contentType = res.headers.get("content-type") || "";
+    try {
+      const res = await fetch(`/api/fetch_reviews?asin=${asin}`);
+      const contentType = res.headers.get("content-type") || "";
 
-    if (!contentType.includes("application/json")) {
-      const text = await res.text();
-      throw new Error(`Expected JSON but got: ${contentType}\n\n${text}`);
-    }
+      if (!contentType.includes("application/json")) {
+        const text = await res.text();
+        throw new Error(`Expected JSON but got: ${contentType}\n\n${text}`);
+      }
 
-    const data = await res.json();
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
 
-    document.getElementById("loadingSpinner").style.display = "none";
-    document.getElementById("mainContainer").style.display = "block";
+      document.getElementById("loadingSpinner").style.display = "none";
+      document.getElementById("mainContainer").style.display = "block";
+      document.getElementById("error-message").style.display = "none";
+      document.getElementById("output-section").style.display = "block";
 
-    if (data.error) {
-      document.getElementById("error-message").innerText = data.error;
+      document.getElementById("productName").innerText = data.product_name || "-";
+      document.getElementById("manufacturer").innerText = data.manufacturer || "-";
+      document.getElementById("price").innerText = data.price || "-";
+      document.getElementById("totalReviews").innerText = data.review_dates?.length || "0";
+      document.getElementById("medianScore").innerText = data.median_score || "-";
+
+      document.getElementById("topAdjectives").innerHTML =
+        Array.isArray(data.top_adjectives) && data.top_adjectives.length
+          ? data.top_adjectives.map(([word, count]) => `<li>${word} (${count})</li>`).join("")
+          : "<li>No adjectives found.</li>";
+
+      document.getElementById("competitorMentions").innerHTML =
+        Object.entries(data.competitor_mentions || {}).length
+          ? Object.entries(data.competitor_mentions).map(([brand, count]) => `<li>${brand} (${count})</li>`).join("")
+          : "<li>No competitors found.</li>";
+
+      document.getElementById("helpfulReviews").innerHTML =
+        Array.isArray(data.top_helpful_reviews) && data.top_helpful_reviews.length
+          ? data.top_helpful_reviews.map(r => `
+              <li>
+                <strong>${r.title}</strong><br>
+                ${r.content}<br>
+                <em>👍 Helpful Votes: ${r.helpful_count || 0}</em>
+              </li>`).join("<br><br>")
+          : "<li>No helpful reviews found.</li>";
+
+      updateCharts(data);
+    } catch (err) {
+      console.error("🚨 Error fetching or parsing data:", err);
+      document.getElementById("error-message").innerText = err.message || "Something went wrong.";
       document.getElementById("error-message").style.display = "block";
-      document.getElementById("output-section").style.display = "none";
-      return;
+      document.getElementById("loadingSpinner").style.display = "none";
+      document.getElementById("mainContainer").style.display = "block";
     }
-
-    document.getElementById("error-message").style.display = "none";
-    document.getElementById("output-section").style.display = "block";
-
-    // [Keep the rest of your UI rendering logic the same]
-    document.getElementById("productName").innerText = data.product_name || "-";
-    document.getElementById("manufacturer").innerText = data.manufacturer || "-";
-    document.getElementById("price").innerText = data.price || "-";
-    document.getElementById("totalReviews").innerText = data.review_dates?.length || "0";
-    document.getElementById("medianScore").innerText = data.median_score || "-";
-
-    document.getElementById("topAdjectives").innerHTML =
-      Array.isArray(data.top_adjectives) && data.top_adjectives.length
-        ? data.top_adjectives.map(([word, count]) => `<li>${word} (${count})</li>`).join("")
-        : "<li>No adjectives found.</li>";
-
-    document.getElementById("competitorMentions").innerHTML =
-      Object.entries(data.competitor_mentions || {}).length
-        ? Object.entries(data.competitor_mentions).map(([brand, count]) => `<li>${brand} (${count})</li>`).join("")
-        : "<li>No competitors found.</li>";
-
-    document.getElementById("helpfulReviews").innerHTML =
-      Array.isArray(data.top_helpful_reviews) && data.top_helpful_reviews.length
-        ? data.top_helpful_reviews.map(r => `
-            <li>
-              <strong>${r.title}</strong><br>
-              ${r.content}<br>
-              <em>👍 Helpful Votes: ${r.helpful_count || 0}</em>
-            </li>
-          `).join("<br><br>")
-        : "<li>No helpful reviews found.</li>";
-
-    updateCharts(data);
-  } catch (err) {
-    console.error("🚨 Error fetching or parsing data:", err);
-    document.getElementById("error-message").innerText = err.message || "Something went wrong.";
-    document.getElementById("error-message").style.display = "block";
-    document.getElementById("loadingSpinner").style.display = "none";
-    document.getElementById("mainContainer").style.display = "block";
   }
-}
-;
-
 
   function updateCharts(data) {
     try { sentimentBreakdownChart?.destroy(); } catch {}
     try { reviewTrendChart?.destroy(); } catch {}
     try { countrySentimentChart?.destroy(); } catch {}
 
-    const ctxBreakdown = document.getElementById("sentimentBreakdownChart").getContext("2d");
-    sentimentBreakdownChart = new Chart(ctxBreakdown, {
+    sentimentBreakdownChart = new Chart(document.getElementById("sentimentBreakdownChart").getContext("2d"), {
       type: "bar",
       data: {
         labels: ["Positive", "Negative", "Neutral"],
@@ -241,30 +224,14 @@
       }
     });
 
-    const ctxTrend = document.getElementById("reviewTrendChart").getContext("2d");
-    reviewTrendChart = new Chart(ctxTrend, {
+    reviewTrendChart = new Chart(document.getElementById("reviewTrendChart").getContext("2d"), {
       type: "line",
       data: {
         labels: data.review_dates || [],
         datasets: [
-          {
-            label: "Positive",
-            data: JSON.parse(data.positive_scores || "[]"),
-            borderColor: "#4caf50",
-            fill: false
-          },
-          {
-            label: "Negative",
-            data: JSON.parse(data.negative_scores || "[]"),
-            borderColor: "#f44336",
-            fill: false
-          },
-          {
-            label: "Neutral",
-            data: JSON.parse(data.neutral_scores || "[]"),
-            borderColor: "#9e9e9e",
-            fill: false
-          }
+          { label: "Positive", data: JSON.parse(data.positive_scores || "[]"), borderColor: "#4caf50", fill: false },
+          { label: "Negative", data: JSON.parse(data.negative_scores || "[]"), borderColor: "#f44336", fill: false },
+          { label: "Neutral", data: JSON.parse(data.neutral_scores || "[]"), borderColor: "#9e9e9e", fill: false }
         ]
       },
       options: {
@@ -273,18 +240,13 @@
       }
     });
 
-    const ctxCountry = document.getElementById("countrySentimentChart").getContext("2d");
-    const labels = Object.keys(data.country_sentiment || {});
-    const pos = labels.map(l => data.country_sentiment[l]?.positive || 0);
-    const neg = labels.map(l => data.country_sentiment[l]?.negative || 0);
-
-    countrySentimentChart = new Chart(ctxCountry, {
+    countrySentimentChart = new Chart(document.getElementById("countrySentimentChart").getContext("2d"), {
       type: "bar",
       data: {
-        labels: labels,
+        labels: Object.keys(data.country_sentiment || {}),
         datasets: [
-          { label: "Positive", data: pos, backgroundColor: "#4caf50" },
-          { label: "Negative", data: neg, backgroundColor: "#f44336" }
+          { label: "Positive", data: Object.values(data.country_sentiment).map(d => d.positive || 0), backgroundColor: "#4caf50" },
+          { label: "Negative", data: Object.values(data.country_sentiment).map(d => d.negative || 0), backgroundColor: "#f44336" }
         ]
       },
       options: {

@@ -1,10 +1,11 @@
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
+from sqlalchemy.sql import func
 import json
 
-
 db = SQLAlchemy()
+
 
 # ---------------------
 # User Table
@@ -13,9 +14,9 @@ class User(UserMixin, db.Model):
     __tablename__ = 'user'
 
     id = db.Column(db.Integer, primary_key=True)
-    email = db.Column(db.String(120), unique=True, nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=False, index=True)
     password_hash = db.Column(db.Text, nullable=False)
-    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+    created_at = db.Column(db.DateTime(timezone=True), server_default=func.now())
 
     # Relationships
     history = db.relationship('ReviewHistory', backref='user', lazy='dynamic', cascade="all, delete-orphan")
@@ -39,8 +40,8 @@ class ReviewHistory(db.Model):
     __tablename__ = 'review_history'
 
     id = db.Column(db.Integer, primary_key=True)
-    asin = db.Column(db.String(20), nullable=False)
-    search_date = db.Column(db.DateTime, default=db.func.current_timestamp())
+    asin = db.Column(db.String(20), nullable=False, index=True)
+    search_date = db.Column(db.DateTime(timezone=True), server_default=func.now())
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
 
     def __repr__(self):
@@ -55,8 +56,12 @@ class FavoriteASIN(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     asin = db.Column(db.String(20), nullable=False)
-    added_on = db.Column(db.DateTime, default=db.func.current_timestamp())
+    added_on = db.Column(db.DateTime(timezone=True), server_default=func.now())
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'asin', name='uq_user_asin'),
+    )
 
     def __repr__(self):
         return f"<FavoriteASIN ASIN={self.asin} UserID={self.user_id}>"
@@ -87,10 +92,14 @@ class SentimentSnapshot(db.Model):
     neutral_percentage = db.Column(db.Float)
     country_sentiment = db.Column(db.Text)
     top_helpful_reviews = db.Column(db.Text)
-    timestamp = db.Column(db.DateTime, default=db.func.current_timestamp())
+    timestamp = db.Column(db.DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        db.Index('ix_snapshot_user_asin', 'user_id', 'asin'),
+    )
 
     def __repr__(self):
-        return f"<Snapshot {self.asin} by User {self.user_id}>"
+        return f"<Snapshot ASIN={self.asin} UserID={self.user_id}>"
 
     def to_dict(self):
         def _safe_load(field, default="[]"):
@@ -114,7 +123,7 @@ class SentimentSnapshot(db.Model):
             "positive_percentage": self.positive_percentage,
             "negative_percentage": self.negative_percentage,
             "neutral_percentage": self.neutral_percentage,
-            "country_sentiment_chart": _safe_load(self.country_sentiment, default="{}"),
+            "country_sentiment": _safe_load(self.country_sentiment, default="{}"),
             "top_helpful_reviews": _safe_load(self.top_helpful_reviews)
         }
 
@@ -129,7 +138,7 @@ class CompetitorCache(db.Model):
     product_name = db.Column(db.String(300), nullable=False)
     manufacturer = db.Column(db.String(200), nullable=False)
     names = db.Column(db.Text, nullable=False)
-    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+    created_at = db.Column(db.DateTime(timezone=True), server_default=func.now())
 
     def __repr__(self):
         return f"<GPTCache {self.product_name} by {self.manufacturer}>"
