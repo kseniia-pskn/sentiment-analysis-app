@@ -2,6 +2,7 @@ import os
 import json
 from collections import Counter
 from openai import OpenAI
+from transformers import pipeline
 import spacy
 
 _spacy_model = None
@@ -86,3 +87,27 @@ def fetch_competitor_names(product_name, manufacturer):
     except Exception as e:
         print(f"[ERROR] GPT competitor fetch failed: {e}")
         return []
+
+
+_sentiment_pipeline = None
+_nlp_model = None
+
+def get_sentiment_pipeline():
+    global _sentiment_pipeline
+    if _sentiment_pipeline is None:
+        print("📦 Loading sentiment analysis model...")
+        _sentiment_pipeline = pipeline(
+            "sentiment-analysis",
+            model="cardiffnlp/twitter-roberta-base-sentiment-latest"
+        )
+        print("✅ Sentiment pipeline loaded.")
+    return _sentiment_pipeline
+
+def get_nlp():
+    global _nlp_model
+    if _nlp_model is None:
+        print("📦 Loading SpaCy model...")
+        import spacy
+        _nlp_model = spacy.load("en_core_web_sm")
+        print("✅ SpaCy model loaded.")
+    return _nlp_model
