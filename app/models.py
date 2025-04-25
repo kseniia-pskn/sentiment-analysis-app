@@ -108,7 +108,31 @@ class SentimentSnapshot(db.Model):
         return f"<Snapshot ASIN={self.asin} UserID={self.user_id}>"
 
     def to_dict(self):
-        """Deserialize all text fields for API response."""
+    """Deserialize all text fields for API response."""
+    def _safe_load(field, default="[]"):
+        try:
+            return json.loads(field or default)
+        except (json.JSONDecodeError, TypeError):
+            return json.loads(default)
+
+    return {
+        "product_name": self.product_name,
+        "manufacturer": self.manufacturer,
+        "price": self.price,
+        "median_score": self.median_score,
+        "top_adjectives": _safe_load(self.top_adjectives, "{}"),
+        "competitor_mentions": _safe_load(self.competitor_mentions, "{}"),
+        "gpt_competitors": _safe_load(self.gpt_competitors),
+        "review_dates": _safe_load(self.review_dates),
+        "positive_scores": _safe_load(self.positive_scores),
+        "negative_scores": _safe_load(self.negative_scores),
+        "neutral_scores": _safe_load(self.neutral_scores),
+        "positive_percentage": self.positive_percentage,
+        "negative_percentage": self.negative_percentage,
+        "neutral_percentage": self.neutral_percentage,
+        "country_sentiment": _safe_load(self.country_sentiment, "{}"),
+        "top_helpful_reviews": _safe_load(self.top_helpful_reviews)
+    }
         def _safe_load(field, default="[]"):
             try:
                 return json.loads(field or default)
