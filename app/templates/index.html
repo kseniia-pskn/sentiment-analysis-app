@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>GetToKnow | Smart Insights for Amazon Products</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            margin: 0;
+            font-family: 'Helvetica Neue', sans-serif;
+            background-color: #f9fafb;
+            color: #111;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 40px;
+            background-color: white;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            font-size: 1.5em;
+            font-weight: bold;
+        }
+
+        .logo img {
+            height: 36px;
+            margin-right: 10px;
+        }
+
+        nav a {
+            margin-left: 20px;
+            text-decoration: none;
+            color: #111;
+            font-weight: 500;
+            padding: 8px 14px;
+            border-radius: 6px;
+            transition: background-color 0.2s;
+        }
+
+        nav a:hover {
+            background-color: #f0f0f0;
+        }
+
+        .hero {
+            text-align: center;
+            padding: 80px 20px 40px;
+        }
+
+        .hero h1 {
+            font-size: 2.8em;
+            margin-bottom: 10px;
+        }
+
+        .hero p {
+            font-size: 1.2em;
+            color: #555;
+            max-width: 700px;
+            margin: 0 auto;
+        }
+
+        .cta {
+            margin-top: 30px;
+        }
+
+        .cta a {
+            background-color: black;
+            color: white;
+            padding: 14px 24px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+        }
+
+        .cta a:hover {
+            background-color: #333;
+        }
+
+        .chart-container {
+            max-width: 700px;
+            margin: 60px auto;
+            padding: 20px;
+            background: linear-gradient(to right, #fde047, #4ade80);
+            border-radius: 20px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="logo">
+        <img src="{{ url_for('static', filename='images/logo.png') }}" alt="GetToKnow Logo">
+        GetToKnow
+    </div>
+    <nav>
+        <a href="/auth/login">Login</a>
+        <a href="/auth/signup">Register</a>
+    </nav>
+</header>
+
+<section class="hero">
+    <h1>The Tools You Need to Make Smarter Buying Decisions</h1>
+    <p>Analyze Amazon product reviews in seconds. Discover hidden patterns in customer sentiment, top adjectives, and competing brands.</p>
+    <div class="cta">
+        <a href="/auth/signup">Get Started</a>
+    </div>
+</section>
+
+<section class="chart-container">
+    <canvas id="animatedChart" height="300"></canvas>
+</section>
+
+<script>
+    const ctx = document.getElementById('animatedChart').getContext('2d');
+    const barChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: ['A', 'B', 'C', 'D', 'E'],
+            datasets: [{
+                label: 'Engagement',
+                data: [10, 15, 8, 12, 9],
+                backgroundColor: '#22c55e',
+                borderRadius: 12
+            }]
+        },
+        options: {
+            animation: {
+                duration: 1000
+            },
+            scales: {
+                y: {
+                    beginAtZero: true
+                }
+            },
+            plugins: {
+                legend: { display: false }
+            }
+        }
+    });
+
+    // Animate bars every 2 seconds
+    setInterval(() => {
+        barChart.data.datasets[0].data = barChart.data.datasets[0].data.map(() => Math.floor(Math.random() * 20) + 1);
+        barChart.update();
+    }, 2000);
+</script>
+
+</body>
+</html>
