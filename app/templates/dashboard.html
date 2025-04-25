@@ -179,21 +179,18 @@
     document.getElementById("totalReviews").innerText = Array.isArray(data.review_dates) ? data.review_dates.length : 0;
     document.getElementById("medianScore").innerText = data.median_score || "-";
 
-    // Top Adjectives
-    const adjectives = data.top_adjectives || [];
-    document.getElementById("topAdjectives").innerHTML =
-      adjectives.length
-        ? adjectives.map(([word, count]) => `<li>${word} (${count})</li>`).join("")
-        : "<li>No adjectives found.</li>";
+    const adjectives = data.top_adjectives || {};
+    const adjectiveItems = Object.entries(adjectives);
+    document.getElementById("topAdjectives").innerHTML = adjectiveItems.length
+      ? adjectiveItems.map(([word, count]) => `<li>${word} (${count})</li>`).join("")
+      : "<li>No adjectives found.</li>";
 
-    // Competitor Mentions
     const competitors = data.competitor_mentions || {};
     document.getElementById("competitorMentions").innerHTML =
       Object.keys(competitors).length
         ? Object.entries(competitors).map(([brand, count]) => `<li>${brand} (${count})</li>`).join("")
         : "<li>No competitors found.</li>";
 
-    // Helpful Reviews
     const reviews = data.top_helpful_reviews || [];
     document.getElementById("helpfulReviews").innerHTML =
       reviews.length
@@ -213,6 +210,9 @@
     sentimentBreakdownChart?.destroy();
     reviewTrendChart?.destroy();
     countrySentimentChart?.destroy();
+
+    // Safe labels for line chart
+    const reviewLabels = (data.review_dates || []).map((d, i) => d === "Unknown" ? `Review ${i + 1}` : d);
 
     sentimentBreakdownChart = new Chart(document.getElementById("sentimentBreakdownChart").getContext("2d"), {
       type: "bar",
@@ -238,7 +238,7 @@
     reviewTrendChart = new Chart(document.getElementById("reviewTrendChart").getContext("2d"), {
       type: "line",
       data: {
-        labels: data.review_dates || [],
+        labels: reviewLabels,
         datasets: [
           { label: "Positive", data: data.positive_scores || [], borderColor: "#4caf50", fill: false },
           { label: "Negative", data: data.negative_scores || [], borderColor: "#f44336", fill: false },
@@ -267,7 +267,12 @@
       options: {
         responsive: true,
         plugins: { title: { display: true, text: "Sentiment by Country" } },
-        scales: { y: { beginAtZero: true } }
+        scales: {
+          y: {
+            beginAtZero: true,
+            suggestedMax: Math.max(...posData.concat(negData), 5)
+          }
+        }
       }
     });
   }
