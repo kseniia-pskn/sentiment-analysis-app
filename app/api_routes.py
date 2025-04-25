@@ -78,6 +78,29 @@ def compute_review_hashes_and_filter(all_reviews, existing_snapshot):
     return reviews, review_dates, countries, review_meta
 
 
+def snapshot_to_dict(snapshot):
+    """Safely deserialize all fields for clean frontend consumption."""
+    return {
+        "asin": snapshot.asin,
+        "product_name": snapshot.product_name,
+        "manufacturer": snapshot.manufacturer,
+        "price": snapshot.price,
+        "median_score": snapshot.median_score,
+        "top_adjectives": json.loads(snapshot.top_adjectives or "[]"),
+        "competitor_mentions": json.loads(snapshot.competitor_mentions or "{}"),
+        "gpt_competitors": json.loads(snapshot.gpt_competitors or "[]"),
+        "review_dates": json.loads(snapshot.review_dates or "[]"),
+        "positive_scores": json.loads(snapshot.positive_scores or "[]"),
+        "negative_scores": json.loads(snapshot.negative_scores or "[]"),
+        "neutral_scores": json.loads(snapshot.neutral_scores or "[]"),
+        "positive_percentage": snapshot.positive_percentage,
+        "negative_percentage": snapshot.negative_percentage,
+        "neutral_percentage": snapshot.neutral_percentage,
+        "country_sentiment": json.loads(snapshot.country_sentiment or "{}"),
+        "top_helpful_reviews": json.loads(snapshot.top_helpful_reviews or "[]")
+    }
+
+
 @api.route('/fetch_reviews', methods=['GET'])
 @login_required
 def fetch_reviews():
@@ -123,7 +146,7 @@ def fetch_reviews():
 
         reviews, review_dates, countries, review_meta = compute_review_hashes_and_filter(all_reviews, existing)
         if not reviews:
-            return jsonify(existing.to_dict() if existing else {"message": "No new reviews."})
+            return jsonify(snapshot_to_dict(existing) if existing else {"message": "No new reviews."})
 
         try:
             sentiment_analyzer = get_sentiment_pipeline()
@@ -210,7 +233,7 @@ def fetch_reviews():
         db.session.add(snapshot)
         db.session.commit()
 
-        return jsonify(snapshot.to_dict())
+        return jsonify(snapshot_to_dict(snapshot))
 
     except Exception as e:
         traceback.print_exc()

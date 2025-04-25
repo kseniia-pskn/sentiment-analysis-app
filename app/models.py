@@ -1,15 +1,14 @@
+import json
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy.sql import func
-import json
 
 db = SQLAlchemy()
 
-
-# ---------------------
+# ==============================
 # User Table
-# ---------------------
+# ==============================
 class User(UserMixin, db.Model):
     __tablename__ = 'user'
 
@@ -27,15 +26,17 @@ class User(UserMixin, db.Model):
         return f"<User {self.email}>"
 
     def set_password(self, password):
+        """Hash and set user password."""
         self.password_hash = generate_password_hash(password)
 
     def check_password(self, password):
+        """Check password against stored hash."""
         return check_password_hash(self.password_hash, password)
 
 
-# ---------------------
-# Review History
-# ---------------------
+# ==============================
+# Review History Table
+# ==============================
 class ReviewHistory(db.Model):
     __tablename__ = 'review_history'
 
@@ -48,9 +49,9 @@ class ReviewHistory(db.Model):
         return f"<ReviewHistory ASIN={self.asin} UserID={self.user_id}>"
 
 
-# ---------------------
-# Favorites
-# ---------------------
+# ==============================
+# Favorite ASINs Table
+# ==============================
 class FavoriteASIN(db.Model):
     __tablename__ = 'favorite_asin'
 
@@ -60,16 +61,16 @@ class FavoriteASIN(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
 
     __table_args__ = (
-        db.UniqueConstraint('user_id', 'asin', name='uq_user_asin'),
+        db.UniqueConstraint('user_id', 'asin', name='uq_user_asin'),  # Prevent duplicate favorites
     )
 
     def __repr__(self):
         return f"<FavoriteASIN ASIN={self.asin} UserID={self.user_id}>"
 
 
-# ---------------------
-# Cached Sentiment Snapshots
-# ---------------------
+# ==============================
+# Sentiment Snapshots Table (Cached)
+# ==============================
 class SentimentSnapshot(db.Model):
     __tablename__ = 'sentiment_snapshot'
 
@@ -80,6 +81,8 @@ class SentimentSnapshot(db.Model):
     manufacturer = db.Column(db.String(200))
     price = db.Column(db.Float)
     median_score = db.Column(db.Float)
+
+    # Serialized JSON fields (stored as text in DB)
     top_adjectives = db.Column(db.Text)
     competitor_mentions = db.Column(db.Text)
     gpt_competitors = db.Column(db.Text)
@@ -87,28 +90,34 @@ class SentimentSnapshot(db.Model):
     positive_scores = db.Column(db.Text)
     negative_scores = db.Column(db.Text)
     neutral_scores = db.Column(db.Text)
+    country_sentiment = db.Column(db.Text)
+    top_helpful_reviews = db.Column(db.Text)
+
+    # Sentiment percentages
     positive_percentage = db.Column(db.Float)
     negative_percentage = db.Column(db.Float)
     neutral_percentage = db.Column(db.Float)
-    country_sentiment = db.Column(db.Text)
-    top_helpful_reviews = db.Column(db.Text)
+
     timestamp = db.Column(db.DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
-        db.Index('ix_snapshot_user_asin', 'user_id', 'asin'),
+        db.Index('ix_snapshot_user_asin', 'user_id', 'asin'),  # For fast lookup by user/asin
     )
 
     def __repr__(self):
         return f"<Snapshot ASIN={self.asin} UserID={self.user_id}>"
 
     def to_dict(self):
+        """Deserialize all text fields for API response."""
         def _safe_load(field, default="[]"):
             try:
                 return json.loads(field or default)
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, TypeError):
                 return json.loads(default)
 
         return {
+            "id": self.id,
+            "asin": self.asin,
             "product_name": self.product_name,
             "manufacturer": self.manufacturer,
             "price": self.price,
@@ -128,16 +137,16 @@ class SentimentSnapshot(db.Model):
         }
 
 
-# ---------------------
-# GPT Competitor Cache
-# ---------------------
+# ==============================
+# GPT Competitor Name Cache
+# ==============================
 class CompetitorCache(db.Model):
     __tablename__ = 'competitor_cache'
 
     id = db.Column(db.Integer, primary_key=True)
     product_name = db.Column(db.String(300), nullable=False)
     manufacturer = db.Column(db.String(200), nullable=False)
-    names = db.Column(db.Text, nullable=False)
+    names = db.Column(db.Text, nullable=False)  # JSON list of GPT-identified competitors
     created_at = db.Column(db.DateTime(timezone=True), server_default=func.now())
 
     def __repr__(self):

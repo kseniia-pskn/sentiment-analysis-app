@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>Dashboard | Sentiment Insight</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     body {
@@ -151,44 +151,13 @@
 
       if (!contentType.includes("application/json")) {
         const text = await res.text();
-        throw new Error(`Expected JSON response but got: ${contentType}\n\n${text}`);
+        throw new Error(`Expected JSON but got: ${contentType}\n\n${text}`);
       }
 
       const data = await res.json();
       if (data.error) throw new Error(data.error);
 
-      document.getElementById("loadingSpinner").style.display = "none";
-      document.getElementById("mainContainer").style.display = "block";
-      document.getElementById("error-message").style.display = "none";
-      document.getElementById("output-section").style.display = "block";
-
-      document.getElementById("productName").innerText = data.product_name || "-";
-      document.getElementById("manufacturer").innerText = data.manufacturer || "-";
-      document.getElementById("price").innerText = data.price || "-";
-      document.getElementById("totalReviews").innerText = (data.review_dates || []).length;
-      document.getElementById("medianScore").innerText = data.median_score || "-";
-
-      document.getElementById("topAdjectives").innerHTML =
-        Array.isArray(data.top_adjectives) && data.top_adjectives.length
-          ? data.top_adjectives.map(([word, count]) => `<li>${word} (${count})</li>`).join("")
-          : "<li>No adjectives found.</li>";
-
-      document.getElementById("competitorMentions").innerHTML =
-        Object.keys(data.competitor_mentions || {}).length
-          ? Object.entries(data.competitor_mentions).map(([brand, count]) => `<li>${brand} (${count})</li>`).join("")
-          : "<li>No competitors found.</li>";
-
-      document.getElementById("helpfulReviews").innerHTML =
-        Array.isArray(data.top_helpful_reviews) && data.top_helpful_reviews.length
-          ? data.top_helpful_reviews.map(r => `
-              <li>
-                <strong>${r.title}</strong><br>
-                ${r.content}<br>
-                <em>👍 Helpful Votes: ${r.helpful_count || 0}</em>
-              </li>`).join("<br><br>")
-          : "<li>No helpful reviews found.</li>";
-
-      updateCharts(data);
+      showResults(data);
     } catch (err) {
       console.error("🚨 Error fetching or parsing data:", err);
       document.getElementById("error-message").innerText = err.message || "Something went wrong.";
@@ -198,10 +167,52 @@
     }
   }
 
+  function showResults(data) {
+    document.getElementById("loadingSpinner").style.display = "none";
+    document.getElementById("mainContainer").style.display = "block";
+    document.getElementById("output-section").style.display = "block";
+    document.getElementById("error-message").style.display = "none";
+
+    document.getElementById("productName").innerText = data.product_name || "-";
+    document.getElementById("manufacturer").innerText = data.manufacturer || "-";
+    document.getElementById("price").innerText = data.price || "-";
+    document.getElementById("totalReviews").innerText = Array.isArray(data.review_dates) ? data.review_dates.length : 0;
+    document.getElementById("medianScore").innerText = data.median_score || "-";
+
+    // Top Adjectives
+    const adjectives = data.top_adjectives || [];
+    document.getElementById("topAdjectives").innerHTML =
+      adjectives.length
+        ? adjectives.map(([word, count]) => `<li>${word} (${count})</li>`).join("")
+        : "<li>No adjectives found.</li>";
+
+    // Competitor Mentions
+    const competitors = data.competitor_mentions || {};
+    document.getElementById("competitorMentions").innerHTML =
+      Object.keys(competitors).length
+        ? Object.entries(competitors).map(([brand, count]) => `<li>${brand} (${count})</li>`).join("")
+        : "<li>No competitors found.</li>";
+
+    // Helpful Reviews
+    const reviews = data.top_helpful_reviews || [];
+    document.getElementById("helpfulReviews").innerHTML =
+      reviews.length
+        ? reviews.map(r => `
+            <li>
+              <strong>${r.title}</strong><br>
+              ${r.content}<br>
+              <em>👍 Helpful Votes: ${r.helpful_count || 0}</em>
+            </li>
+          `).join("<br><br>")
+        : "<li>No helpful reviews found.</li>";
+
+    updateCharts(data);
+  }
+
   function updateCharts(data) {
-    try { sentimentBreakdownChart?.destroy(); } catch {}
-    try { reviewTrendChart?.destroy(); } catch {}
-    try { countrySentimentChart?.destroy(); } catch {}
+    sentimentBreakdownChart?.destroy();
+    reviewTrendChart?.destroy();
+    countrySentimentChart?.destroy();
 
     sentimentBreakdownChart = new Chart(document.getElementById("sentimentBreakdownChart").getContext("2d"), {
       type: "bar",
@@ -209,7 +220,11 @@
         labels: ["Positive", "Negative", "Neutral"],
         datasets: [{
           label: "Sentiment (%)",
-          data: [data.positive_percentage, data.negative_percentage, data.neutral_percentage],
+          data: [
+            data.positive_percentage || 0,
+            data.negative_percentage || 0,
+            data.neutral_percentage || 0
+          ],
           backgroundColor: ["#4caf50", "#f44336", "#9e9e9e"]
         }]
       },
