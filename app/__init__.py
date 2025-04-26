@@ -15,16 +15,24 @@ def create_app():
     # Configuration
     # ----------------------
     app.config['SECRET_KEY'] = os.getenv("SECRET_KEY", "default-secret-key")
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DATABASE_URL")
+
+    #  fallback to SQLite if DATABASE_URL is not provided
+    app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
+        "DATABASE_URL", 
+        "sqlite:///local_database.db"
+    )
+
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
     # ----------------------
     # Extensions
     # ----------------------
     db.init_app(app)
+
     login_manager = LoginManager()
     login_manager.login_view = "auth.login"
     login_manager.init_app(app)
+
     CORS(app)
 
     @login_manager.user_loader

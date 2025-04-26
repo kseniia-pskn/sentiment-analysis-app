@@ -1,370 +1,171 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Dashboard | Sentiment Insight</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        body {
-            font-family: 'Helvetica Neue', sans-serif;
-            margin: 0;
-            padding: 0;
-            background-color: #f1f1f1;
-            color: #222;
-        }
-        header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 20px 40px;
-            background-color: #f8f8f8;
-            border-bottom: 1px solid #e0e0e0;
-        }
-        header h1 {
-            font-weight: 700;
-            font-size: 1.8em;
-            margin: 0;
-        }
-        .nav-links {
-            display: flex;
-            gap: 20px;
-        }
-        .nav-links a {
-            text-decoration: none;
-            color: #333;
-            font-weight: 500;
-        }
-        .container {
-            max-width: 1200px;
-            margin: 40px auto;
-            padding: 40px;
-            background-color: white;
-            border-radius: 14px;
-            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.07);
-        }
-        h2 {
-            margin-top: 0;
-            font-size: 1.5em;
-        }
-        input[type="text"] {
-            padding: 10px;
-            font-size: 1em;
-            width: 280px;
-            border: 1px solid #ccc;
-            border-radius: 8px;
-        }
-        button {
-            padding: 10px 20px;
-            font-size: 1em;
-            background-color: #111;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            margin-left: 10px;
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
-        button:hover {
-            background-color: #333;
-        }
-        .section {
-            margin-top: 40px;
-        }
-        ul {
-            padding-left: 20px;
-        }
-        .chart-container {
-            width: 100%;
-            margin: 40px 0;
-        }
-        canvas {
-            max-width: 100%;
-        }
-        .flex-group {
-            display: flex;
-            gap: 40px;
-            flex-wrap: wrap;
-        }
-        .flex-item {
-            flex: 1 1 300px;
-        }
-        .info-box span {
-            display: block;
-            margin-bottom: 6px;
-        }
-        #loadingSpinner {
-            display: none;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: rgba(255,255,255,0.9);
-            z-index: 1000;
-        }
-        #loadingSpinner svg {
-            animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-    </style>
+  <meta charset="UTF-8">
+  <title>Dashboard | Sentiment Insight</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: 'Helvetica Neue', sans-serif; background: #f1f1f1; margin: 0; padding: 0; color: #222; }
+    header { display: flex; justify-content: space-between; align-items: center; padding: 20px 40px; background: #f8f8f8; border-bottom: 1px solid #e0e0e0; }
+    header h1 { margin: 0; font-weight: 700; font-size: 1.8em; }
+    .nav-links { display: flex; gap: 20px; }
+    .nav-links a { text-decoration: none; color: #333; font-weight: 500; }
+    .container { max-width: 1200px; margin: 40px auto; padding: 40px; background: #fff; border-radius: 14px; box-shadow: 0 5px 20px rgba(0, 0, 0, 0.07); }
+    input[type="text"], input[type="number"] { padding: 10px; font-size: 1em; width: 250px; border: 1px solid #ccc; border-radius: 8px; margin-bottom: 10px; }
+    button { padding: 10px 20px; font-size: 1em; background-color: #111; color: white; border: none; border-radius: 8px; cursor: pointer; transition: background-color 0.2s; }
+    button:hover { background-color: #333; }
+    .chart-container { width: 100%; margin: 40px 0; }
+    #loadingSpinner { display: none; flex-direction: column; align-items: center; justify-content: center; height: 100vh; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255, 255, 255, 0.9); z-index: 1000; }
+    #toast { display: none; position: fixed; bottom: 30px; right: 30px; background: #4caf50; color: white; padding: 10px 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.2); }
+    #loadingSpinner svg { animation: spin 1s linear infinite; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+  </style>
 </head>
 <body>
 <header>
-    <h1>GetToKnow</h1>
-    <div class="nav-links">
-        <a href="/dashboard">Dashboard</a>
-        <a href="/profile">Profile</a>
-        <a href="#" onclick="logout()">Logout</a>
-    </div>
+  <h1>GetToKnow</h1>
+  <div class="nav-links">
+    <a href="/dashboard">Dashboard</a>
+    <a href="/profile">Profile</a>
+    <a href="#" onclick="logout()">Logout</a>
+  </div>
 </header>
 
 <div id="loadingSpinner">
-    <svg width="50" height="50" viewBox="0 0 100 100" fill="none">
-        <circle cx="50" cy="50" r="35" stroke="#111" stroke-width="10" stroke-linecap="round" stroke-dasharray="165 57">
-            <animateTransform attributeName="transform" type="rotate" repeatCount="indefinite" dur="1s"
-                              values="0 50 50;360 50 50" keyTimes="0;1"></animateTransform>
-        </circle>
-    </svg>
-    <p>Loading...</p>
+  <svg width="50" height="50" viewBox="0 0 100 100">
+    <circle cx="50" cy="50" r="35" stroke="#111" stroke-width="10" fill="none" stroke-linecap="round" stroke-dasharray="165 57">
+      <animateTransform attributeName="transform" type="rotate" repeatCount="indefinite" dur="1s" values="0 50 50;360 50 50" keyTimes="0;1"/>
+    </circle>
+  </svg>
+  <p id="loadingText">Loading...</p>
 </div>
 
-<div class="container" style="display:none;" id="mainContainer">
-    <h2>Search Product by ASIN</h2>
-    <input type="text" id="productSearch" placeholder="Enter ASIN">
-    <button onclick="fetchProductData()">Analyze</button>
-    <p id="error-message" style="color:red; display:none;"></p>
+<div id="toast">✅ Analysis Complete!</div>
 
-    <div id="output-section" style="display:none;">
-        <h3>Product Information</h3>
-        <p><strong>Name:</strong> <span id="productName"></span></p>
-        <p><strong>Manufacturer:</strong> <span id="manufacturer"></span></p>
-        <p><strong>Price:</strong> $<span id="price"></span></p>
-        <p><strong>Total Reviews:</strong> <span id="totalReviews"></span></p>
-        <p><strong>Median Score:</strong> <span id="medianScore"></span></p>
+<div class="container" id="mainContainer">
+  <h2>Search Product by ASIN</h2>
+  <input type="text" id="productSearch" placeholder="Enter ASIN">
+  <input type="number" id="reviewCount" placeholder="Number of Reviews" min="10" max="500" value="50">
+  <button id="analyzeButton" onclick="fetchProductData()">Analyze</button>
+  <p style="font-size: 0.9em; color: gray;">The more reviews you request, the longer the analysis might take.</p>
+  <p id="error-message" style="color:red; display:none;"></p>
 
-        <h3>Top Adjectives</h3>
-        <ul id="topAdjectives"></ul>
+  <div id="output-section" style="display:none;">
+    <h3>Product Information</h3>
+    <p><strong>Name:</strong> <span id="productName"></span></p>
+    <p><strong>Manufacturer:</strong> <span id="manufacturer"></span></p>
+    <p><strong>Price:</strong> $<span id="price"></span></p>
+    <p><strong>Total Reviews Scraped:</strong> <span id="totalReviews"></span></p>
+    <p><strong>Median Score:</strong> <span id="medianScore"></span></p>
 
-        <h3>Competitor Mentions</h3>
-        <ul id="competitorMentions"></ul>
+    <h3>Top Adjectives</h3>
+    <ul id="topAdjectives"></ul>
 
-        <h3>Top Helpful Reviews</h3>
-        <ul id="helpfulReviews"></ul>
+    <h3>Competitor Mentions</h3>
+    <ul id="competitorMentions"></ul>
 
-        <div class="chart-container">
-            <h3>Sentiment Breakdown</h3>
-            <canvas id="sentimentBreakdownChart"></canvas>
-        </div>
+    <h3>Top Helpful Reviews</h3>
+    <ul id="helpfulReviews"></ul>
 
-        <div class="chart-container">
-            <h3>Sentiment Over Time</h3>
-            <canvas id="reviewTrendChart"></canvas>
-        </div>
-
-        <div class="chart-container">
-            <h3>Sentiment by Country</h3>
-            <canvas id="countrySentimentChart"></canvas>
-        </div>
+    <div class="chart-container">
+      <h3>Sentiment Breakdown</h3>
+      <canvas id="sentimentBreakdownChart"></canvas>
     </div>
+    <div class="chart-container">
+      <h3>Sentiment Over Time</h3>
+      <canvas id="reviewTrendChart"></canvas>
+    </div>
+    <div class="chart-container">
+      <h3>Sentiment by Country</h3>
+      <canvas id="countrySentimentChart"></canvas>
+    </div>
+  </div>
 </div>
 
 <script>
-    window.addEventListener("load", () => {
-        document.getElementById("loadingSpinner").style.display = "none";
-        document.getElementById("mainContainer").style.display = "block";
-    });
+async function fetchProductData() {
+  const asin = document.getElementById("productSearch").value.trim();
+  const count = parseInt(document.getElementById("reviewCount").value.trim(), 10);
+  const button = document.getElementById("analyzeButton");
 
-    let reviewTrendChart, sentimentBreakdownChart, countrySentimentChart;
+  if (!asin || isNaN(count)) {
+    return alert("Please enter both a valid ASIN and number of reviews.");
+  }
 
-    async function fetchProductData() {
-        const asin = document.getElementById("productSearch").value.trim();
-        if (!asin) return alert("Please enter an ASIN.");
+  document.getElementById("loadingText").innerText = `Scraping ${count} reviews...`;
+  document.getElementById("loadingSpinner").style.display = "flex";
+  document.getElementById("mainContainer").style.display = "none";
+  button.disabled = true;
 
-        document.getElementById("loadingSpinner").style.display = "flex";
-        document.getElementById("mainContainer").style.display = "none";
+  try {
+    const res = await fetch(`/api/fetch_reviews?asin=${asin}&count=${count}`);
+    const data = await res.json();
 
-        try {
-            const res = await fetch(`/api/fetch_reviews?asin=${asin}`);
-            const data = await res.json();
+    document.getElementById("loadingSpinner").style.display = "none";
+    document.getElementById("mainContainer").style.display = "block";
+    button.disabled = false;
 
-            document.getElementById("loadingSpinner").style.display = "none";
-            document.getElementById("mainContainer").style.display = "block";
-
-            if (data.error) {
-                document.getElementById("error-message").innerText = data.error;
-                document.getElementById("error-message").style.display = "block";
-                document.getElementById("output-section").style.display = "none";
-                return;
-            }
-
-            document.getElementById("error-message").style.display = "none";
-            document.getElementById("output-section").style.display = "block";
-
-            document.getElementById("productName").innerText = data.product_name || "-";
-            document.getElementById("manufacturer").innerText = data.manufacturer || "-";
-            document.getElementById("price").innerText = data.price || "-";
-            document.getElementById("totalReviews").innerText = data.total_reviews || data.review_dates.length || "0";
-            document.getElementById("medianScore").innerText = data.median_score || "-";
-
-            document.getElementById("topAdjectives").innerHTML =
-                data.top_adjectives.length
-                    ? data.top_adjectives.map(([word, count]) => `<li>${word} (${count})</li>`).join("")
-                    : "<li>No adjectives found.</li>";
-
-            document.getElementById("competitorMentions").innerHTML =
-                Object.keys(data.competitor_mentions).length
-                    ? Object.entries(data.competitor_mentions).map(([brand, count]) => `<li>${brand} (${count})</li>`).join("")
-                    : "<li>No competitors found.</li>";
-
-            document.getElementById("helpfulReviews").innerHTML =
-                data.top_helpful_reviews.length
-                    ? data.top_helpful_reviews.map(r => `<li><strong>${r.title}</strong><br>${r.content}</li>`).join("<br><br>")
-                    : "<li>No helpful reviews found.</li>";
-
-            updateCharts(data);
-        } catch (err) {
-            console.error("Error fetching data:", err);
-            document.getElementById("error-message").innerText = "Something went wrong.";
-            document.getElementById("error-message").style.display = "block";
-            document.getElementById("loadingSpinner").style.display = "none";
-            document.getElementById("mainContainer").style.display = "block";
-        }
+    if (data.error) {
+      document.getElementById("error-message").innerText = data.error;
+      document.getElementById("error-message").style.display = "block";
+      document.getElementById("output-section").style.display = "none";
+      return;
     }
 
-    function updateCharts(data) {
-        if (window.sentimentBreakdownChart && typeof window.sentimentBreakdownChart.destroy === 'function') {
-            window.sentimentBreakdownChart.destroy();
-        }
-        if (window.reviewTrendChart && typeof window.reviewTrendChart.destroy === 'function') {
-            window.reviewTrendChart.destroy();
-        }
-        if (window.countrySentimentChart && typeof window.countrySentimentChart.destroy === 'function') {
-            window.countrySentimentChart.destroy();
-        }
+    document.getElementById("error-message").style.display = "none";
+    document.getElementById("output-section").style.display = "block";
 
-        const breakdownCtx = document.getElementById('sentimentBreakdownChart').getContext('2d');
-        window.sentimentBreakdownChart = new Chart(breakdownCtx, {
-            type: 'bar',
-            data: {
-                labels: ['Positive', 'Negative', 'Neutral'],
-                datasets: [{
-                    label: 'Sentiment (%)',
-                    data: [
-                        data.positive_percentage,
-                        data.negative_percentage,
-                        data.neutral_percentage
-                    ],
-                    backgroundColor: ['#4caf50', '#f44336', '#9e9e9e']
-                }]
-            },
-            options: {
-                responsive: true,
-                plugins: {
-                    title: {
-                        display: true,
-                        text: 'Sentiment Breakdown'
-                    }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        max: 100
-                    }
-                }
-            }
-        });
+    document.getElementById("productName").innerText = data.product_name || "-";
+    document.getElementById("manufacturer").innerText = data.manufacturer || "-";
+    document.getElementById("price").innerText = data.price || "-";
+    document.getElementById("totalReviews").innerText = data.total_reviews_scraped || data.review_dates.length || 0;
+    document.getElementById("medianScore").innerText = data.median_score || "-";
 
-        const trendCtx = document.getElementById('reviewTrendChart').getContext('2d');
-        window.reviewTrendChart = new Chart(trendCtx, {
-            type: 'line',
-            data: {
-                labels: data.review_dates,
-                datasets: [{
-                    label: 'Positive',
-                    data: data.positive_scores,
-                    borderColor: '#4caf50',
-                    fill: false
-                }, {
-                    label: 'Negative',
-                    data: data.negative_scores,
-                    borderColor: '#f44336',
-                    fill: false
-                }, {
-                    label: 'Neutral',
-                    data: data.neutral_scores,
-                    borderColor: '#9e9e9e',
-                    fill: false
-                }]
-            },
-            options: {
-                responsive: true,
-                plugins: {
-                    title: {
-                        display: true,
-                        text: 'Sentiment Over Time'
-                    }
-                }
-            }
-        });
+    document.getElementById("topAdjectives").innerHTML = data.top_adjectives.length ? data.top_adjectives.map(([word, count]) => `<li>${word} (${count})</li>`).join("") : "<li>No adjectives found.</li>";
+    document.getElementById("competitorMentions").innerHTML = Object.keys(data.competitor_mentions).length ? Object.entries(data.competitor_mentions).map(([brand, count]) => `<li>${brand} (${count})</li>`).join("") : "<li>No competitors found.</li>";
+    document.getElementById("helpfulReviews").innerHTML = data.top_helpful_reviews.length ? data.top_helpful_reviews.map(r => `<li><strong>${r.title}</strong><br>${r.content}<br><em>👍 Helpful: ${r.helpful_count || 0}</em></li>`).join("<br><br>") : "<li>No helpful reviews found.</li>";
 
-        const countryCtx = document.getElementById('countrySentimentChart').getContext('2d');
-        const countryLabels = Object.keys(data.country_sentiment || {});
-        const countryPositive = countryLabels.map(c => data.country_sentiment[c].positive || 0);
-        const countryNegative = countryLabels.map(c => data.country_sentiment[c].negative || 0);
+    updateCharts(data);
+    showToast();
+  } catch (err) {
+    console.error("Error fetching data:", err);
+    document.getElementById("error-message").innerText = "Something went wrong.";
+    document.getElementById("error-message").style.display = "block";
+    document.getElementById("loadingSpinner").style.display = "none";
+    document.getElementById("mainContainer").style.display = "block";
+    button.disabled = false;
+  }
+}
 
-        window.countrySentimentChart = new Chart(countryCtx, {
-            type: 'bar',
-            data: {
-                labels: countryLabels,
-                datasets: [
-                    {
-                        label: 'Positive',
-                        data: countryPositive,
-                        backgroundColor: '#4caf50'
-                    },
-                    {
-                        label: 'Negative',
-                        data: countryNegative,
-                        backgroundColor: '#f44336'
-                    }
-                ]
-            },
-            options: {
-                responsive: true,
-                plugins: {
-                    title: {
-                        display: true,
-                        text: 'Sentiment by Country'
-                    }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true
-                    }
-                }
-            }
-        });
-    }
+function updateCharts(data) {
+  if (window.sentimentBreakdownChart?.destroy) window.sentimentBreakdownChart.destroy();
+  if (window.reviewTrendChart?.destroy) window.reviewTrendChart.destroy();
+  if (window.countrySentimentChart?.destroy) window.countrySentimentChart.destroy();
 
-    function logout() {
-        fetch('/auth/logout', {
-            method: 'POST',
-            credentials: 'include'
-        }).then(() => {
-            window.location.href = '/auth/login';
-        }).catch(err => {
-            alert('Logout failed');
-            console.error(err);
-        });
-    }
+  const commonAnimation = { duration: 1000, easing: 'easeOutQuart' };
+  const datesWithScores = (data.review_dates || []).map((date, i) => ({ date, pos: data.positive_scores[i], neg: data.negative_scores[i], neu: data.neutral_scores[i] })).sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  window.sentimentBreakdownChart = new Chart(document.getElementById('sentimentBreakdownChart').getContext('2d'), { type: 'bar', data: { labels: ['Positive', 'Negative', 'Neutral'], datasets: [{ label: 'Sentiment (%)', data: [data.positive_percentage, data.negative_percentage, data.neutral_percentage], backgroundColor: ['#4caf50', '#f44336', '#9e9e9e'] }] }, options: { responsive: true, animation: commonAnimation, plugins: { title: { display: true, text: 'Sentiment Breakdown' } }, scales: { y: { beginAtZero: true, max: 100 } } } });
+
+  window.reviewTrendChart = new Chart(document.getElementById('reviewTrendChart').getContext('2d'), { type: 'line', data: { labels: datesWithScores.map(e => e.date), datasets: [ { label: 'Positive', data: datesWithScores.map(e => e.pos), borderColor: '#4caf50', fill: false }, { label: 'Negative', data: datesWithScores.map(e => e.neg), borderColor: '#f44336', fill: false }, { label: 'Neutral', data: datesWithScores.map(e => e.neu), borderColor: '#9e9e9e', fill: false } ] }, options: { responsive: true, animation: commonAnimation, plugins: { title: { display: true, text: 'Sentiment Over Time' } } } });
+
+  const countries = Object.keys(data.country_sentiment || {});
+  window.countrySentimentChart = new Chart(document.getElementById('countrySentimentChart').getContext('2d'), { type: 'bar', data: { labels: countries, datasets: [ { label: 'Positive', data: countries.map(c => data.country_sentiment[c].positive || 0), backgroundColor: '#4caf50' }, { label: 'Negative', data: countries.map(c => data.country_sentiment[c].negative || 0), backgroundColor: '#f44336' } ] }, options: { responsive: true, animation: commonAnimation, plugins: { title: { display: true, text: 'Sentiment by Country' } }, scales: { y: { beginAtZero: true } } } });
+}
+
+function showToast() {
+  const toast = document.getElementById("toast");
+  toast.style.display = "block";
+  setTimeout(() => toast.style.display = "none", 3000);
+}
+
+function logout() {
+  fetch('/auth/logout', { method: 'POST', credentials: 'include' })
+    .then(() => window.location.href = '/auth/login')
+    .catch(err => { alert('Logout failed'); console.error(err); });
+}
 </script>
+
 </body>
 </html>

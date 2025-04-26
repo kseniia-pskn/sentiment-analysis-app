@@ -17,7 +17,6 @@ class User(UserMixin, db.Model):
     password_hash = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime(timezone=True), server_default=func.now())
 
-    # Relationships
     history = db.relationship('ReviewHistory', backref='user', lazy='dynamic', cascade="all, delete-orphan")
     favorites = db.relationship('FavoriteASIN', backref='user', lazy='dynamic', cascade="all, delete-orphan")
     snapshots = db.relationship('SentimentSnapshot', backref='user', lazy='dynamic', cascade="all, delete-orphan")
@@ -26,11 +25,9 @@ class User(UserMixin, db.Model):
         return f"<User {self.email}>"
 
     def set_password(self, password):
-        """Hash and set user password."""
         self.password_hash = generate_password_hash(password)
 
     def check_password(self, password):
-        """Check password against stored hash."""
         return check_password_hash(self.password_hash, password)
 
 
@@ -61,7 +58,7 @@ class FavoriteASIN(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
 
     __table_args__ = (
-        db.UniqueConstraint('user_id', 'asin', name='uq_user_asin'),  # Prevent duplicate favorites
+        db.UniqueConstraint('user_id', 'asin', name='uq_user_asin'),
     )
 
     def __repr__(self):
@@ -82,7 +79,7 @@ class SentimentSnapshot(db.Model):
     price = db.Column(db.Float)
     median_score = db.Column(db.Float)
 
-    # Serialized JSON fields (stored as text in DB)
+    # JSON fields
     top_adjectives = db.Column(db.Text)
     competitor_mentions = db.Column(db.Text)
     gpt_competitors = db.Column(db.Text)
@@ -92,8 +89,8 @@ class SentimentSnapshot(db.Model):
     neutral_scores = db.Column(db.Text)
     country_sentiment = db.Column(db.Text)
     top_helpful_reviews = db.Column(db.Text)
+    total_reviews_scraped = db.Column(db.Integer, default=0)
 
-    # Sentiment percentages
     positive_percentage = db.Column(db.Float)
     negative_percentage = db.Column(db.Float)
     neutral_percentage = db.Column(db.Float)
@@ -101,38 +98,15 @@ class SentimentSnapshot(db.Model):
     timestamp = db.Column(db.DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
-        db.Index('ix_snapshot_user_asin', 'user_id', 'asin'),  # For fast lookup by user/asin
+        db.Index('ix_snapshot_user_asin', 'user_id', 'asin'),
     )
 
     def __repr__(self):
         return f"<Snapshot ASIN={self.asin} UserID={self.user_id}>"
 
     def to_dict(self):
-    """Deserialize all text fields for API response."""
-    def _safe_load(field, default="[]"):
-        try:
-            return json.loads(field or default)
-        except (json.JSONDecodeError, TypeError):
-            return json.loads(default)
+        """Deserialize all text fields for API response."""
 
-    return {
-        "product_name": self.product_name,
-        "manufacturer": self.manufacturer,
-        "price": self.price,
-        "median_score": self.median_score,
-        "top_adjectives": _safe_load(self.top_adjectives, "{}"),
-        "competitor_mentions": _safe_load(self.competitor_mentions, "{}"),
-        "gpt_competitors": _safe_load(self.gpt_competitors),
-        "review_dates": _safe_load(self.review_dates),
-        "positive_scores": _safe_load(self.positive_scores),
-        "negative_scores": _safe_load(self.negative_scores),
-        "neutral_scores": _safe_load(self.neutral_scores),
-        "positive_percentage": self.positive_percentage,
-        "negative_percentage": self.negative_percentage,
-        "neutral_percentage": self.neutral_percentage,
-        "country_sentiment": _safe_load(self.country_sentiment, "{}"),
-        "top_helpful_reviews": _safe_load(self.top_helpful_reviews)
-    }
         def _safe_load(field, default="[]"):
             try:
                 return json.loads(field or default)
@@ -146,8 +120,8 @@ class SentimentSnapshot(db.Model):
             "manufacturer": self.manufacturer,
             "price": self.price,
             "median_score": self.median_score,
-            "top_adjectives": _safe_load(self.top_adjectives),
-            "competitor_mentions": _safe_load(self.competitor_mentions, default="{}"),
+            "top_adjectives": _safe_load(self.top_adjectives, "{}"),
+            "competitor_mentions": _safe_load(self.competitor_mentions, "{}"),
             "gpt_competitors": _safe_load(self.gpt_competitors),
             "review_dates": _safe_load(self.review_dates),
             "positive_scores": _safe_load(self.positive_scores),
@@ -156,13 +130,13 @@ class SentimentSnapshot(db.Model):
             "positive_percentage": self.positive_percentage,
             "negative_percentage": self.negative_percentage,
             "neutral_percentage": self.neutral_percentage,
-            "country_sentiment": _safe_load(self.country_sentiment, default="{}"),
+            "country_sentiment": _safe_load(self.country_sentiment, "{}"),
             "top_helpful_reviews": _safe_load(self.top_helpful_reviews)
         }
 
 
 # ==============================
-# GPT Competitor Name Cache
+# GPT Competitor Cache
 # ==============================
 class CompetitorCache(db.Model):
     __tablename__ = 'competitor_cache'
@@ -170,7 +144,7 @@ class CompetitorCache(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     product_name = db.Column(db.String(300), nullable=False)
     manufacturer = db.Column(db.String(200), nullable=False)
-    names = db.Column(db.Text, nullable=False)  # JSON list of GPT-identified competitors
+    names = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime(timezone=True), server_default=func.now())
 
     def __repr__(self):

@@ -1,10 +1,14 @@
 import os
 import json
 import threading
+import re
+import hashlib
 from collections import Counter
+from datetime import datetime
 from openai import OpenAI
-from transformers import pipeline
+from transformers import pipeline as transformers_pipeline
 import spacy
+import spacy.cli
 
 _sentiment_pipeline = None
 _nlp_model = None
@@ -21,7 +25,6 @@ def get_nlp():
             print("✅ SpaCy model loaded.")
         except OSError:
             print("⬇️ Downloading SpaCy model...")
-            import spacy.cli
             spacy.cli.download("en_core_web_sm")
             _nlp_model = spacy.load("en_core_web_sm")
             print("✅ SpaCy model downloaded and loaded.")
@@ -31,7 +34,7 @@ def get_sentiment_pipeline():
     global _sentiment_pipeline
     if _sentiment_pipeline is None:
         print("📦 Loading sentiment analysis model...")
-        _sentiment_pipeline = pipeline(
+        _sentiment_pipeline = transformers_pipeline(
             "sentiment-analysis",
             model="cardiffnlp/twitter-roberta-base-sentiment-latest"
         )
@@ -55,7 +58,8 @@ def extract_adjectives_and_competitors(reviews, nlp=None):
             )
             for ent in doc.ents:
                 if ent.label_ == "ORG":
-                    competitor_mentions[ent.text.strip().lower()] += 1
+                    key = ent.text.strip().lower()
+                    competitor_mentions[key] = competitor_mentions.get(key, 0) + 1
     except Exception as e:
         print(f"[ERROR] SpaCy processing failed: {e}")
         return [], {}
@@ -78,7 +82,7 @@ def fetch_competitor_names(product_name, manufacturer):
             "You are a product analysis assistant. Given a product name and manufacturer, "
             "return a JSON list of similar or competing brands/products.\n\n"
             f"Product: {product_name}\nManufacturer: {manufacturer}\n\n"
-            "Example: [\"L'Oréal\", \"Vaseline\", \"CeraVe\"]"
+            "Example: [\"L'Oreal\", \"Vaseline\", \"CeraVe\"]"
         )
 
         response = client.chat.completions.create(
@@ -104,6 +108,55 @@ def fetch_competitor_names(product_name, manufacturer):
         return []
 
 # ---------------------
+# Review Processing Helpers
+# ---------------------
+def compute_review_hashes_and_filter(all_reviews, existing_snapshot):
+    reviews, review_dates, countries, review_meta = [], [], [], []
+    existing_hashes = set()
+
+    if existing_snapshot:
+        try:
+            for rev in json.loads(existing_snapshot.top_helpful_reviews):
+                h = hashlib.sha256(rev.get("content", "").strip().encode()).hexdigest()
+                existing_hashes.add(h)
+        except Exception as e:
+            print("[WARNING] Failed to load existing hashes:", e)
+
+    for r in all_reviews:
+        text = r.get("content", "").strip()
+        timestamp = r.get("timestamp", "").strip()
+        country = "USA"
+        formatted = "Unknown"
+
+        try:
+            match = re.search(r'(January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}, \d{4}', timestamp)
+            if match:
+                date_str = match.group(0)
+                formatted = datetime.strptime(date_str, "%B %d, %Y").strftime("%Y-%m-%d")
+
+            if "Reviewed in" in timestamp:
+                parts = timestamp.split("Reviewed in")[1].split("on")
+                if len(parts) > 1:
+                    country = parts[0].strip()
+        except Exception as e:
+            print(f"[WARNING] Failed to parse timestamp: {timestamp} -> {e}")
+
+        content_hash = hashlib.sha256(text.encode()).hexdigest()
+        if text and content_hash not in existing_hashes:
+            reviews.append(text)
+            review_dates.append(formatted)
+            countries.append(country)
+            review_meta.append({
+                "title": r.get("title", ""),
+                "content": text,
+                "helpful_count": r.get("helpful_count", 0),
+                "country": country
+            })
+            existing_hashes.add(content_hash)
+
+    return reviews, review_dates, countries, review_meta
+
+# ---------------------
 # Self-Diagnostics on Startup
 # ---------------------
 def run_startup_diagnostics():
@@ -117,8 +170,8 @@ def run_startup_diagnostics():
         print(f"[ERROR] SpaCy failed to load: {e}")
 
     try:
-        pipeline = get_sentiment_pipeline()
-        result = pipeline("I love this product!")
+        sentiment_pipe = get_sentiment_pipeline()
+        result = sentiment_pipe("I love this product!")
         print(f"✅ Sentiment pipeline works: {result}")
     except Exception as e:
         print(f"[ERROR] Sentiment pipeline failed: {e}")
@@ -132,5 +185,4 @@ def run_startup_diagnostics():
 def run_diagnostics_on_startup():
     threading.Thread(target=run_startup_diagnostics).start()
 
-# Trigger diagnostics
 run_diagnostics_on_startup()
